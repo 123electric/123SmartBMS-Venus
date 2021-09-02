@@ -1,0 +1,7 @@
+#!/bin/bash
+
+grep -qxF 'ACTION=="add", ENV{ID_BUS}=="usb", ENV{ID_MODEL}=="SmartBMSToUSB", ENV{VE_SERVICE}="smartbms"' /etc/udev/rules.d/serial-starter.rules || echo 'ACTION=="add", ENV{ID_BUS}=="usb", ENV{ID_MODEL}=="SmartBMSToUSB", ENV{VE_SERVICE}="smartbms"' >> /etc/udev/rules.d/serial-starter.rules
+grep -qxF 'service smartbms        smartbms-dbus' /etc/venus/serial-starter.conf || echo 'service smartbms        smartbms-dbus' >> /etc/venus/serial-starter.conf
+rm -rf /opt/victronenergy/service-templates/smartbms-dbus
+mkdir /opt/victronenergy/service-templates/smartbms-dbus
+cp -r /data/smartbms/service/* /opt/victronenergy/service-templates/smartbms-dbus
