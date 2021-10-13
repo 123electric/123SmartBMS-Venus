@@ -146,8 +146,7 @@ driver = {
 	'servicename' : "smartbms",
 	'instance'	: 1,
 	'id'		  : 0x01,
-	'version'	 : 0.1,
-	'serial'	  : "123SMARTBMS2021A1"
+	'version'	 : 0.2
 }
 
 parser = argparse.ArgumentParser(description = '123SmartBMS driver')
@@ -158,7 +157,8 @@ args = parser.parse_args()
 # Have a mainloop, so we can send/receive asynchronous calls to and from dbus
 DBusGMainLoop(set_as_default=True)
 
-dbusservice = VeDbusService("com.victronenergy.battery." + args.device[args.device.rfind('/') + 1:])
+device_port = args.device[args.device.rfind('/') + 1:]
+dbusservice = VeDbusService("com.victronenergy.battery." + device_port)
 
 # Create the management objects, as specified in the ccgx dbus-api document
 dbusservice.add_path('/Mgmt/ProcessName', __file__)
@@ -171,7 +171,7 @@ dbusservice.add_path('/ProductId',	   driver['id'])
 dbusservice.add_path('/ProductName',	 driver['name'])
 dbusservice.add_path('/FirmwareVersion', driver['version'])
 dbusservice.add_path('/HardwareVersion', driver['version'])
-dbusservice.add_path('/Serial',		  driver['serial'])
+dbusservice.add_path('/Serial',		  'SmartBMS' + device_port)
 dbusservice.add_path('/Connected',	   1)
 
 # Create device list
