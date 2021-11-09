@@ -172,7 +172,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 0.5
+            'version'    : 0.6
         }
 
         self._gettexts = {
@@ -309,7 +309,9 @@ class SmartBMSDbus():
             nominal_pack_voltage = self._BMS.determine_nominal_voltage()*self._BMS.cell_count
             # If no nominal pack voltage could be determined, just use current pack voltage
             if(nominal_pack_voltage == 0): nominal_pack_voltage = self._BMS.pack_voltage
-            self._dbusservice["/ConsumedAmphours"] = -1*(self._BMS.capacity*1000-self._BMS.energy_stored)/nominal_pack_voltage
+            consumed_amp_hours = round(-1*(self._BMS.capacity*1000-self._BMS.energy_stored)/nominal_pack_voltage,1)
+            if(consumed_amp_hours < 0.1): consumed_amp_hours = 0 # Convert negative zero to zero
+            self._dbusservice["/ConsumedAmphours"] = consumed_amp_hours
             
             # Filter current with a 3 minute moving average filter to stabilize the time-to-go
             if(len(self._current_filter) >= 180):
