@@ -164,7 +164,7 @@ class SmartBMSDbus():
         self._BMS = SmartBMS(dev)
         self._dev = dev
         self._serial_id = serial_id
-        self.comm_error_shadow = False
+        self._comm_error_shadow = False
         self._current_filter = deque()
         self._nominal_pack_voltage = 0
         
@@ -172,7 +172,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 0.6
+            'version'    : 0.8
         }
 
         self._gettexts = {
@@ -309,8 +309,10 @@ class SmartBMSDbus():
             nominal_pack_voltage = self._BMS.determine_nominal_voltage()*self._BMS.cell_count
             # If no nominal pack voltage could be determined, just use current pack voltage
             if(nominal_pack_voltage == 0): nominal_pack_voltage = self._BMS.pack_voltage
-            consumed_amp_hours = round(-1*(self._BMS.capacity*1000-self._BMS.energy_stored)/nominal_pack_voltage,1)
-            if(consumed_amp_hours < 0.1): consumed_amp_hours = 0 # Convert negative zero to zero
+            if(nominal_pack_voltage > 0): # Avoid divide by zero
+                consumed_amp_hours = round(-1*(self._BMS.capacity*1000-self._BMS.energy_stored)/nominal_pack_voltage,1)+0 # Add zero to remove negative sigh from -0.0
+            else:
+                consumed_amp_hours = 0
             self._dbusservice["/ConsumedAmphours"] = consumed_amp_hours
             
             # Filter current with a 3 minute moving average filter to stabilize the time-to-go
@@ -322,15 +324,16 @@ class SmartBMSDbus():
             for value in self._current_filter:
                 current_filter_sum += value
             current_filter_average = current_filter_sum/len(self._current_filter)
-            if current_filter_average < 0:
-                self._dbusservice['/TimeToGo'] = (self._BMS.soc*self._BMS.capacity * 10) * 60 * 60 / (self._BMS.pack_voltage * -1 * current_filter_average)
+            pack_power_filtered = (self._BMS.pack_voltage * -1 * current_filter_average)
+            if current_filter_average < 0 and pack_power_filtered > 0: # pack_power_filtered > 0 to avoid divide by zero
+                self._dbusservice['/TimeToGo'] = (self._BMS.soc*self._BMS.capacity * 10) * 60 * 60 / pack_power_filtered
             else:
                 self._dbusservice['/TimeToGo'] = None
        
         if(self._BMS.alarm_serial_communication and not self._comm_error_shadow):
             self._comm_error_shadow = True
             print('Serial comm error')
-        if(self._BMS.alarm_serial_communication and self._comm_error_shadow):
+        if(not self._BMS.alarm_serial_communication and self._comm_error_shadow):
             self._comm_error_shadow = False
             print('Serial comm restored')
         
