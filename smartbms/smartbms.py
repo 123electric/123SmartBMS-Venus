@@ -172,7 +172,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 0.8
+            'version'    : 0.9
         }
 
         self._gettexts = {
@@ -281,7 +281,7 @@ class SmartBMSDbus():
         else:
             self._dbusservice["/Soc"] = self._BMS.soc
             self._dbusservice["/SystemSwitch"] = 1
-            self._dbusservice["/Capacity"] = self._BMS.capacity
+            self._dbusservice["/Capacity"] = round(self._BMS.energy_stored/1000, 1)
             self._dbusservice["/InstalledCapacity"] = self._BMS.capacity
             self._dbusservice["/Dc/0/Voltage"] = self._BMS.pack_voltage
             self._dbusservice["/Dc/0/Current"] = self._BMS.pack_current
@@ -324,9 +324,16 @@ class SmartBMSDbus():
             for value in self._current_filter:
                 current_filter_sum += value
             current_filter_average = current_filter_sum/len(self._current_filter)
-            pack_power_filtered = (self._BMS.pack_voltage * -1 * current_filter_average)
-            if current_filter_average < 0 and pack_power_filtered > 0: # pack_power_filtered > 0 to avoid divide by zero
-                self._dbusservice['/TimeToGo'] = (self._BMS.soc*self._BMS.capacity * 10) * 60 * 60 / pack_power_filtered
+            pack_power_filtered = (nominal_pack_voltage * -1 * current_filter_average)
+            normalized_power = self._BMS.capacity*1000*0.05 # The pack capacity was rated at a current of <= 0.05C -> calculate this measurement current (in wh)
+            if current_filter_average < 0 and pack_power_filtered > 0 and normalized_power > 0 and self._BMS.capacity > 0: # > 0 to avoid divide by zero
+                # When discharge power is bigger than normalized current, use Peukert-like formula
+                if(pack_power_filtered > normalized_power):
+                    time_to_go_from_full =  60 * 60 * (self._BMS.capacity*1000)/(pow(pack_power_filtered/normalized_power, 1.02))/normalized_power
+                    time_to_go = time_to_go_from_full*(self._BMS.energy_stored/(self._BMS.capacity*1000))
+                else:
+                    time_to_go = self._BMS.energy_stored * 60 * 60 / pack_power_filtered
+                self._dbusservice['/TimeToGo'] = time_to_go
             else:
                 self._dbusservice['/TimeToGo'] = None
        

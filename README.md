@@ -37,11 +37,3 @@ Plug the [123\SmartBMS to USB cable](https://123electric.eu/products/123smartbms
     smartbms/reinstall
 ```
 4. Reboot.
-
-## Raspberry Pi projects
-
-To speed up development of custom Raspberry Pi projects, we have developed code for the Raspberry Pi. This code connects to the BMS via the 123\SmartBMS to USB cable and can upload the BMS data to Thingspeak. For more installation instructions, please see our [GitHub repository](https://github.com/123electric/smartbms-thingspeak).
-
-## Manual
-
-Coming soon.
