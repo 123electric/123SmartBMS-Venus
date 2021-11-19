@@ -174,18 +174,6 @@ class SmartBMSDbus():
             'id'          : 0,
             'version'    : 0.9
         }
-
-        self._gettexts = {
-                        '/ConsumedAmphours': {'gettext': '%.1FAh'},
-                        '/System/MaxCellVoltage': {'gettext': '%.2FV'},
-                        '/System/MinCellVoltage': {'gettext': '%.2FV'},
-                        '/Dc/0/Voltage': {'gettext': '%.2FV'},
-                        '/Dc/0/Current': {'gettext': '%.1FA'},
-                        '/Dc/0/Power': {'gettext': '%.0FW'},
-                        '/Soc': {'gettext': '%.0F%%'},
-                        '/Capacity': {'gettext': '%.1FkWh'},
-                        '/InstalledCapacity': {'gettext': '%.1FkWh'}
-        }
         
         device_port = args.device[dev.rfind('/') + 1:]
         device_port_num = device_port[device_port.rfind('USB') + 3:]
@@ -216,12 +204,21 @@ class SmartBMSDbus():
         # Create the bms paths
         self._dbusservice.add_path('/TimeToGo',                             None)
         self._dbusservice.add_path('/SystemSwitch',                         None)
+        self._dbusservice.add_path('/Soc',                                  None, gettextcallback=lambda p, v: "{:.0f}%%".format(v))
+        self._dbusservice.add_path('/Capacity',                             None, gettextcallback=lambda p, v: "{:.1f}kWh".format(v))
+        self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.1f}kWh".format(v))
+        self._dbusservice.add_path('/ConsumedAmphours',                     None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
+        self._dbusservice.add_path('/Dc/0/Voltage',                         None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
+        self._dbusservice.add_path('/Dc/0/Current',                         None, gettextcallback=lambda p, v: "{:.1f}A".format(v))
+        self._dbusservice.add_path('/Dc/0/Power',                           None, gettextcallback=lambda p, v: "{:.0f}W".format(v))
         self._dbusservice.add_path('/Dc/0/Temperature',                     None)
         self._dbusservice.add_path('/Io/AllowToCharge',                     None)
         self._dbusservice.add_path('/Io/AllowToDischarge',                  None)
         self._dbusservice.add_path('/Info/UpdateTimestamp',                 None)
         #self._dbusservice.add_path('/Voltages/Cell1',                      None)
         #self._dbusservice.add_path('/Voltages/Cell2',                      None)
+        self._dbusservice.add_path('/System/MaxCellVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
+        self._dbusservice.add_path('/System/MinCellVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/System/MinVoltageCellId',              None)
         self._dbusservice.add_path('/System/MaxVoltageCellId',              None)
         self._dbusservice.add_path('/System/MinCellTemperature',            None)
@@ -232,14 +229,14 @@ class SmartBMSDbus():
         self._dbusservice.add_path('/System/NrOfModulesOffline',            None)
         self._dbusservice.add_path('/System/NrOfModulesBlockingCharge',     None)
         self._dbusservice.add_path('/System/NrOfModulesBlockingDischarge',  None)
+        self._dbusservice.add_path('/Info/BatteryLowVoltage',               None)
+        self._dbusservice.add_path('/Info/MaxChargeVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
+        self._dbusservice.add_path('/Info/MaxChargeCurrent',                None, gettextcallback=lambda p, v: "{:.2f}A".format(v))
+        self._dbusservice.add_path('/Info/MaxDischargeCurrent',             None, gettextcallback=lambda p, v: "{:.2f}A".format(v))
         self._dbusservice.add_path('/Alarms/LowVoltage',                    None)
         self._dbusservice.add_path('/Alarms/HighVoltage',                   None)
         self._dbusservice.add_path('/Alarms/LowTemperature',                None)
         self._dbusservice.add_path('/Alarms/HighTemperature',               None)
-        
-        # Register paths with custom texts
-        for path in self._gettexts.keys():
-            self._dbusservice.add_path(path, value=None, gettextcallback=self._gettext)
         
         # Register persistent settings
         self._settings_register()
@@ -278,6 +275,10 @@ class SmartBMSDbus():
             self._dbusservice["/Alarms/HighVoltage"] = None
             self._dbusservice["/Alarms/LowTemperature"] = None
             self._dbusservice["/Alarms/HighTemperature"] = None
+            self._dbusservice["/Info/BatteryLowVoltage"] = None
+            self._dbusservice["/Info/MaxChargeVoltage"] = None
+            self._dbusservice["/Info/MaxChargeCurrent"] = 0
+            self._dbusservice["/Info/MaxDischargeCurrent"] = 0
         else:
             self._dbusservice["/Soc"] = self._BMS.soc
             self._dbusservice["/SystemSwitch"] = 1
@@ -305,6 +306,10 @@ class SmartBMSDbus():
             self._dbusservice["/Alarms/HighVoltage"] = int(self._BMS.alarm_maximum_voltage)
             self._dbusservice["/Alarms/LowTemperature"] = int(self._BMS.alarm_minimum_temperature)
             self._dbusservice["/Alarms/HighTemperature"] = int(self._BMS.alarm_maximum_temperature)
+            self._dbusservice["/Info/BatteryLowVoltage"] = (3 * self._BMS.cell_count)
+            self._dbusservice["/Info/MaxChargeVoltage"] = (self._BMS.balance_voltage + 0.3) * self._BMS.cell_count
+            self._dbusservice["/Info/MaxChargeCurrent"] = 5
+            self._dbusservice["/Info/MaxDischargeCurrent"] = 5
             
             nominal_pack_voltage = self._BMS.determine_nominal_voltage()*self._BMS.cell_count
             # If no nominal pack voltage could be determined, just use current pack voltage
@@ -349,16 +354,6 @@ class SmartBMSDbus():
     def _settext(self, path, value): # Currently only used for CustomName
         self._settings['CustomName'] = value
         return True
-        
-    def _gettext(self, path, value):
-        item = self._gettexts.get(path)
-        if item is not None:
-            return item['gettext'] % value
-        return str(value)
-
-    # Currently nothing has to be done with the saved setting
-    def _handle_setting_changed(self, setting, oldvalue, newvalue):
-        return True
 
     def _settings_register(self):
         # Load all persistent data
@@ -367,7 +362,7 @@ class SmartBMSDbus():
                 supportedSettings={
                 'CustomName': ['/Settings/123electric/Products/'+ self._serial_id + '/CustomName', self._info['name'], 0, 0]
                 },
-                eventCallback = self._handle_setting_changed)
+                eventCallback = lambda: "True")
 
 # Called on a one second timer
 def handle_timer_tick():
