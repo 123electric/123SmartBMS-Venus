@@ -101,7 +101,7 @@ class SmartBMS:
     # Must be called every second
     def update(self):
         self._update_time_to_go()
-        self._balance_check()
+        self._unbalance_check()
         self._calculate_consumed_ah()
         self._calculate_current_limits()
        
@@ -122,12 +122,13 @@ class SmartBMS:
         if self._battery_full_counter >= 10 and self.soc == 100: # When BMS also sees the pack as full
             self._balance_state = self.BALANCE_STATE_BALANCED
         
-        if self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage > 0.03: # Unbalance of more than 40mV
+        # Battery idle and unbalance of more than 40mV
+        if self.capacity_ah*-0.05 < battery_current_balancing < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.04:
             self._unbalance_detection_timer += 1
         else:
             self._unbalance_detection_timer = 0
         
-        # At least 60 seconds in a row a voltage difference of more than 30mV? Unbalance detected
+        # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
         if self._unbalance_detection_timer > 60:
             self._balance_state = self.BALANCE_STATE_UNBALANCED
         
@@ -168,7 +169,7 @@ class SmartBMS:
         else:
             self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING
         
-        print('')
+        #print('')
         if self._balance_state == self.BALANCE_STATE_UNBALANCED:
             highest_cell_voltage_target = round(self.cell_voltage_full + 0.005, 3)
             voltage_upper_limit_cell_margin = 0.035
@@ -176,8 +177,8 @@ class SmartBMS:
             # If code just started, set value to default
             if(self.max_charge_voltage == 0): self.max_charge_voltage = voltage_upper_limit
             
-            print('Highest cell voltage target:\t{}'.format(highest_cell_voltage_target))
-            print('Highest cell voltage:\t\t{}'.format(self.highest_cell_voltage))
+            #print('Highest cell voltage target:\t{}'.format(highest_cell_voltage_target))
+            #print('Highest cell voltage:\t\t{}'.format(self.highest_cell_voltage))
             # When battery is ~unbalanced, charge to a point where all cells are balancing.
             # When the battery is balanced, charge to a voltage a little lower so no balancing energy is wasted
             charge_voltage_controller_kp = 0.1
@@ -192,17 +193,17 @@ class SmartBMS:
             # limit integral, only lower voltage when needed
             if self._charge_voltage_controller_integral*charge_voltage_controller_ki > voltage_upper_limit_cell_margin: self._charge_voltage_controller_integral = voltage_upper_limit_cell_margin/charge_voltage_controller_ki
             if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.2: self._charge_voltage_controller_integral = -0.2/charge_voltage_controller_ki
-            print('Controller error:\t\t{}'.format(charge_voltage_controller_error))
-            print('Controller integral:\t\t{}'.format(self._charge_voltage_controller_integral))
+            #print('Controller error:\t\t{}'.format(charge_voltage_controller_error))
+            #print('Controller integral:\t\t{}'.format(self._charge_voltage_controller_integral))
             charge_voltage_controller_output = round(charge_voltage_controller_kp * charge_voltage_controller_error + charge_voltage_controller_ki * self._charge_voltage_controller_integral, 3)
-            print('Controller ouput:\t\t{}'.format(charge_voltage_controller_output))
+            #print('Controller ouput:\t\t{}'.format(charge_voltage_controller_output))
             charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output) * self.cell_count, 2)
             self.max_charge_voltage = charge_voltage if charge_voltage < voltage_upper_limit else voltage_upper_limit
         else:
-            self.max_charge_voltage = ((self.cell_voltage_full - 0.03) * self.cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
+            self.max_charge_voltage = ((self.cell_voltage_full - 0.04) * self.cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
         
-        print('Charge voltage:\t{}'.format(self.max_charge_voltage))
+        #print('Charge voltage:\t{}'.format(self.max_charge_voltage))
     
     def _calculate_consumed_ah(self):
         battery_voltage = self.nominal_battery_voltage
