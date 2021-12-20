@@ -1,0 +1,55 @@
+#!/bin/bash
+
+#	123 SmartBMS
+#	setup script (install/uninstall)
+#
+# this script will accept the following commands on the command line:
+#	setup install
+#	setup uninstall
+#	setup reinstall (used to reinstall after Venus OS update)
+
+#### following line incorporates SetupHelper utilities into this script
+# Refer to the SetupHelper ReadMe file for details.
+
+source "/data/SetupHelper/CommonResources"
+
+#### end of lines to include SetupHelper
+
+rulesFile="/etc/udev/rules.d/serial-starter.rules"
+ruleToAdd='ACTION=="add", ENV{ID_BUS}=="usb", ENV{ID_MODEL}=="SmartBMSToUSB", ENV{VE_SERVICE}="smartbms"'
+
+confToAdd='service smartbms        smartbms-dbus'
+confFile=/etc/venus/serial-starter.conf
+
+tempFile="$scriptDir/tempFile"
+
+if [ $scriptAction == 'INSTALL' ] ; then
+
+	if [ $(grep -c "$ruleToAdd" "$rulesFile") == 0 ]; then
+		cp $rulesFile $tempFile
+		echo $ruleToAdd >> "$tempFile"
+		updateActiveFile "$tempFile" "$rulesFile"
+		rm -f "$tempFile"
+	fi
+
+	if [ $(grep -c "$confToAdd" "$confFile") == 0 ]; then
+		cp $confFile $tempFile
+		echo $confToAdd >> "$tempFile"
+		updateActiveFile "$tempFile" "$confFile"
+		rm -f "$tempFile"
+	fi
+
+	# install service template to be used by serial-starter
+	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
+	mkdir /opt/victronenergy/service-templates/smartbms-dbus
+	cp -r /data/smartbms/service/* /opt/victronenergy/service-templates/smartbms-dbus
+fi
+
+if [ $scriptAction == 'UNINSTALL' ] ; then
+    restoreActiveFile "$rulesFile"
+    restoreActiveFile "$confFile"
+
+	# remove service template
+	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
+fi
+endScript

@@ -172,7 +172,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 0.9
+            'version'    : 1.0
         }
 
         self._gettexts = {
