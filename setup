@@ -38,6 +38,10 @@ if [ $scriptAction == 'INSTALL' ] ; then
 		updateActiveFile "$tempFile" "$confFile"
 		rm -f "$tempFile"
 	fi
+	
+	if [ -f "/data/rc.local" ]; then
+		sed -i -e 's|/data/smartbms/reinstall||g' /data/rc.local
+	fi
 
 	# install service template to be used by serial-starter
 	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
