@@ -342,7 +342,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 0.10
+            'version'    : 1.01
         }
         
         device_port = args.device[dev.rfind('/') + 1:]
@@ -358,7 +358,7 @@ class SmartBMSDbus():
         self._dbusservice.add_path('/DeviceInstance', 288+int(device_port_num))
         self._dbusservice.add_path('/ProductId',     self._info['id'])
         self._dbusservice.add_path('/ProductName',     self._info['name'])
-        self._dbusservice.add_path('/FirmwareVersion', self._info['version'])
+        self._dbusservice.add_path('/FirmwareVersion', self._info['version'], gettextcallback=lambda p, v: "v{:.2f}".format(v))
         self._dbusservice.add_path('/HardwareVersion', None)
         self._dbusservice.add_path('/Serial', self._serial_id)
         self._dbusservice.add_path('/Connected',     1)
