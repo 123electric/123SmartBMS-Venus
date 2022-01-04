@@ -52,7 +52,7 @@ if [ $scriptAction == 'INSTALL' ] ; then
 	# install service template to be used by serial-starter
 	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
 	mkdir /opt/victronenergy/service-templates/smartbms-dbus
-	cp -r /data/smartbms-venus/service/* /opt/victronenergy/service-templates/smartbms-dbus
+	cp -r /data/123SmartBMS-Venus/service/* /opt/victronenergy/service-templates/smartbms-dbus
 	rebootNeeded=true
 fi
 
