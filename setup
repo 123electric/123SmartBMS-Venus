@@ -44,9 +44,8 @@ if [ $scriptAction == 'INSTALL' ] ; then
 		sed -i -e 's|/data/smartbms/reinstall||g' /data/rc.local
 	fi
 	
-	if [ -d "/data/smartbms" ]; then
-		rm -r /data/smartbms
-	fi
+	rm -rf /data/smartbms
+	rm -rf /data/smartbms-venus
 	# End removing legacy files
 
 	# install service template to be used by serial-starter
