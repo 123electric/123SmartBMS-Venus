@@ -16,6 +16,7 @@ from gi.repository import GLib
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
 import dbus.service
 import ve_utils
+from dbusmonitor import DbusMonitor
 from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 
@@ -30,8 +31,8 @@ class SmartBMS:
     
     def __init__(
         self,
-        dev,
-        loop
+        loop,
+        dev
     ):
         self.loop = loop
         
@@ -66,16 +67,6 @@ class SmartBMS:
         self.allowed_to_discharge = 0
         self.nominal_battery_voltage = 0
         self.consumed_ah = 0
-        self.charge_current_limit = 0
-        self.max_charge_voltage = 0
-        self.max_discharge_current = 0
-        self.max_charge_current = 0
-        
-        self._balance_state = self.BALANCE_STATE_UNBALANCED
-        self._battery_full_counter = 0
-        self._balanced_timer = 0
-        self._unbalance_detection_timer = 0
-        self._charge_voltage_controller_integral = 0
         
         self._comm_error_shadow = False
         self._current_filter = deque()
@@ -100,142 +91,14 @@ class SmartBMS:
     
     # Must be called every second
     def update(self):
-        self._update_time_to_go()
-        self._unbalance_check()
         self._calculate_consumed_ah()
-        self._calculate_current_limits()
-       
+            
         if self.alarm_serial_communication and not self._comm_error_shadow:
             self._comm_error_shadow = True
             print('Serial comm error')
         if not self.alarm_serial_communication and self._comm_error_shadow:
             self._comm_error_shadow = False
             print('Serial comm restored')
-    
-    def _unbalance_check(self):
-        battery_current_balancing = self.battery_current - 1 # When all cells balance, the charge current is 1A lower because of passive balancing
-        if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current_balancing < self.capacity_ah*0.05:
-            self._battery_full_counter += 1
-        else:
-            self._battery_full_counter = 0
-        
-        if self._battery_full_counter >= 10 and self.soc == 100: # When BMS also sees the pack as full
-            self._balance_state = self.BALANCE_STATE_BALANCED
-        
-        # Battery idle and unbalance of more than 40mV
-        if self.capacity_ah*-0.05 < battery_current_balancing < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.04:
-            self._unbalance_detection_timer += 1
-        else:
-            self._unbalance_detection_timer = 0
-        
-        # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
-        if self._unbalance_detection_timer > 60:
-            self._balance_state = self.BALANCE_STATE_UNBALANCED
-        
-         # At least balance once a week
-        if self._balance_state == self.BALANCE_STATE_BALANCED:
-            self._balanced_timer += 1
-            if self._balanced_timer >= 7*24*60*60:
-                self._balance_state = self.BALANCE_STATE_UNBALANCED
-                self._balanced_timer = 0
-    
-    def _calculate_current_limits(self):
-        if self.alarm_cell_communication or self.alarm_serial_communication:
-            max_discharge_current = 0
-            max_charge_current = 0
-            return
-        
-        # Discharge - very simple algorithm, may need control loop for better results
-        discharge_limit = self.capacity_ah*self.BATTERY_DISCHARGE_MAX_RATING
-        if not self.allowed_to_discharge:
-            self.max_discharge_current = 0
-        elif self.lowest_cell_voltage - 0.05 <= self.cell_voltage_min:
-            self.max_discharge_current = 0
-        elif self.soc <= 10:
-            self.max_discharge_current = round(discharge_limit/20, 1)
-        elif 10 < self.soc <= 20:
-            self.max_discharge_current = round(discharge_limit/4, 1)
-        elif 20 < self.soc <= 30:
-            self.max_discharge_current = round(discharge_limit/2, 1)
-        else:
-            self.max_discharge_current = round(discharge_limit, 1)
-        
-        # Charge
-        # Fixed charge current - when pack is full, regulate the voltage
-        if not self.allowed_to_charge:
-            self.max_charge_current = 0
-        elif self.highest_cell_voltage+0.05 >= self.cell_voltage_max: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
-            self.max_charge_current = 0
-        else:
-            self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING
-        
-        #print('')
-        if self._balance_state == self.BALANCE_STATE_UNBALANCED:
-            highest_cell_voltage_target = round(self.cell_voltage_full + 0.005, 3)
-            voltage_upper_limit_cell_margin = 0.035
-            voltage_upper_limit = (highest_cell_voltage_target + voltage_upper_limit_cell_margin) * self.cell_count
-            # If code just started, set value to default
-            if(self.max_charge_voltage == 0): self.max_charge_voltage = voltage_upper_limit
-            
-            #print('Highest cell voltage target:\t{}'.format(highest_cell_voltage_target))
-            #print('Highest cell voltage:\t\t{}'.format(self.highest_cell_voltage))
-            # When battery is ~unbalanced, charge to a point where all cells are balancing.
-            # When the battery is balanced, charge to a voltage a little lower so no balancing energy is wasted
-            charge_voltage_controller_kp = 0.1
-            charge_voltage_controller_ki = 0.03
-            charge_voltage_controller_setpoint = highest_cell_voltage_target
-            charge_voltage_controller_input = self.highest_cell_voltage
-            charge_voltage_controller_error = charge_voltage_controller_setpoint - charge_voltage_controller_input # Negative value when over full threshold - example: -0.1 (100mV over threshold)
-            if charge_voltage_controller_error <= 0:
-                self._charge_voltage_controller_integral = self._charge_voltage_controller_integral + charge_voltage_controller_error
-            else: # positive error, slowly rise
-                self._charge_voltage_controller_integral = self._charge_voltage_controller_integral + (0.0001/charge_voltage_controller_ki)
-            # limit integral, only lower voltage when needed
-            if self._charge_voltage_controller_integral*charge_voltage_controller_ki > voltage_upper_limit_cell_margin: self._charge_voltage_controller_integral = voltage_upper_limit_cell_margin/charge_voltage_controller_ki
-            if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.2: self._charge_voltage_controller_integral = -0.2/charge_voltage_controller_ki
-            #print('Controller error:\t\t{}'.format(charge_voltage_controller_error))
-            #print('Controller integral:\t\t{}'.format(self._charge_voltage_controller_integral))
-            charge_voltage_controller_output = round(charge_voltage_controller_kp * charge_voltage_controller_error + charge_voltage_controller_ki * self._charge_voltage_controller_integral, 3)
-            #print('Controller ouput:\t\t{}'.format(charge_voltage_controller_output))
-            charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output) * self.cell_count, 2)
-            self.max_charge_voltage = charge_voltage if charge_voltage < voltage_upper_limit else voltage_upper_limit
-        else:
-            self.max_charge_voltage = ((self.cell_voltage_full - 0.04) * self.cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
-            charge_voltage_controller_ki = 0 # Reset controller
-        
-        #print('Charge voltage:\t{}'.format(self.max_charge_voltage))
-    
-    def _calculate_consumed_ah(self):
-        battery_voltage = self.nominal_battery_voltage
-        # If no nominal battery voltage could be determined, just use current battery voltage
-        if battery_voltage == 0: battery_voltage = self.battery_voltage
-        if battery_voltage > 0: # Avoid divide by zero
-            self.consumed_ah = round(-1*(self.capacity*1000-self.energy_stored)/battery_voltage,1)+0 # Add zero to remove negative sigh from -0.0
-        else:
-            self.consumed_ah = 0
-            
-    def _update_time_to_go(self):
-        # Filter current with a 3 minute moving average filter to stabilize the time-to-go
-        if len(self._current_filter) >= 180:
-            self._current_filter.popleft()
-        self._current_filter.append(self.battery_current)
-        
-        current_filter_sum = 0
-        for value in self._current_filter:
-            current_filter_sum += value
-        current_filter_average = current_filter_sum/len(self._current_filter)
-        battery_power_filtered = (self.nominal_battery_voltage * -1 * current_filter_average)
-        normalized_power = self.capacity*1000*0.05 # The battery capacity was rated at a current of <= 0.05C -> calculate this measurement current (in wh)
-        if current_filter_average < 0 and battery_power_filtered > 0 and normalized_power > 0 and self.capacity > 0: # > 0 to avoid divide by zero
-            # When discharge power is bigger than normalized current, use Peukert-like formula
-            if battery_power_filtered > normalized_power:
-                time_to_go_from_full =  60 * 60 * (self.capacity*1000)/(pow(battery_power_filtered/normalized_power, 1.02))/normalized_power
-                time_to_go = time_to_go_from_full*(self.energy_stored/(self.capacity*1000))
-            else:
-                time_to_go = self.energy_stored * 60 * 60 / battery_power_filtered
-            self.time_to_go = time_to_go
-        else:
-            self.time_to_go = None
     
     def _poll(self, dev, test_packet = ''):
         try:
@@ -331,10 +194,20 @@ class SmartBMS:
 
     def _decode_temperature(self, raw_value):
         return round(struct.unpack('>H', raw_value[0:2])[0]*0.857-232,0)
+        
+        
+    def _calculate_consumed_ah(self):
+        battery_voltage = self.nominal_battery_voltage
+        # If no nominal battery voltage could be determined, just use current battery voltage
+        if battery_voltage == 0: battery_voltage = self.battery_voltage
+        if battery_voltage > 0: # Avoid divide by zero
+            self.consumed_ah = round(-1*(self.capacity*1000-self.energy_stored)/battery_voltage,1)+0 # Add zero to remove negative sigh from -0.0
+        else:
+            self.consumed_ah = 0
 
-class SmartBMSDbus():
-    def __init__(self, bms, dev, serial_id):
-        self._bms = bms
+class SmartBMSDbus(SmartBMS):
+    def __init__(self, loop, dev, serial_id):
+        super().__init__(loop, dev)
         self._dev = dev
         self._serial_id = serial_id
         
@@ -342,12 +215,37 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 1.01
+            'version'    : 1.3
         }
         
+        dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
+		dbus_tree = {
+			'com.victronenergy.vebus' : {
+				'/Ac/ActiveIn/ActiveInput': dummy,
+				'/Ac/ActiveIn/L1/P': dummy,
+				'/Ac/ActiveIn/L2/P': dummy,
+				'/Ac/ActiveIn/L3/P': dummy,
+				'/Ac/Out/L1/P': dummy,
+				'/Ac/Out/L2/P': dummy,
+				'/Ac/Out/L3/P': dummy,
+				'/Connected': dummy,
+				'/ProductId': dummy,
+				'/ProductName': dummy,
+				'/Mgmt/Connection': dummy,
+				'/Mode': dummy,
+				'/State': dummy,
+				'/Dc/0/Voltage': dummy,
+				'/Dc/0/Current': dummy,
+				'/Dc/0/Power': dummy,
+				'/Soc': dummy}
+		}
+
+
         device_port = args.device[dev.rfind('/') + 1:]
         device_port_num = device_port[device_port.rfind('USB') + 3:]
         self._dbusservice = VeDbusService("com.victronenergy.battery." + device_port)
+        self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
+			deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
         
         # Create the management objects, as specified in the ccgx dbus-api document
         self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
@@ -412,9 +310,25 @@ class SmartBMSDbus():
         self._settings_register()
         # Register paths which can be externally changed, for example via the GUI
         self._dbusservice.add_path('/CustomName', value=self._settings['CustomName'], writeable=True, onchangecallback=self._settext)
+        
+        self.charge_current_limit = 0
+        self.max_charge_voltage = 0
+        self.max_discharge_current = 0
+        self.max_charge_current = 0
+        
+        self._balance_state = self.BALANCE_STATE_UNBALANCED
+        self._battery_full_counter = 0
+        self._balanced_timer = 0
+        self._unbalance_detection_timer = 0
+        self._charge_voltage_controller_integral = 0
     
     def update(self):
-        if self._bms.alarm_cell_communication or self._bms.alarm_serial_communication:
+        super().update()
+        self._update_time_to_go()
+        self._unbalance_check()
+        self._calculate_current_limits()
+        
+        if self.alarm_cell_communication or self.alarm_serial_communication:
             self._dbusservice["/Soc"] = None
             self._dbusservice["/SystemSwitch"] = None
             self._dbusservice["/ConsumedAmphours"] = None
@@ -448,38 +362,38 @@ class SmartBMSDbus():
             self._dbusservice["/Info/MaxChargeCurrent"] = 0
             self._dbusservice["/Info/MaxDischargeCurrent"] = 0
         else:
-            self._dbusservice["/Soc"] = self._bms.soc
+            self._dbusservice["/Soc"] = self.soc
             self._dbusservice["/SystemSwitch"] = 1
-            self._dbusservice["/ConsumedAmphours"] = self._bms.consumed_ah
-            self._dbusservice["/Capacity"] = round(self._bms.energy_stored/1000, 1)
-            self._dbusservice["/InstalledCapacity"] = self._bms.capacity
-            self._dbusservice['/TimeToGo'] = self._bms.time_to_go
-            self._dbusservice["/Dc/0/Voltage"] = self._bms.battery_voltage
-            self._dbusservice["/Dc/0/Current"] = self._bms.battery_current
-            self._dbusservice["/Dc/0/Power"] = self._bms.battery_voltage * self._bms.battery_current
-            self._dbusservice["/Dc/0/Temperature"] = self._bms.highest_cell_temperature
-            self._dbusservice["/Io/AllowToCharge"] = int(self._bms.allowed_to_charge)
-            self._dbusservice["/Io/AllowToDischarge"] = int(self._bms.allowed_to_discharge)
-            self._dbusservice["/System/MinCellVoltage"] = round(self._bms.lowest_cell_voltage, 2)
-            self._dbusservice["/System/MinVoltageCellId"] = self._bms.lowest_cell_voltage_num
-            self._dbusservice["/System/MaxCellVoltage"] = round(self._bms.highest_cell_voltage, 2)
-            self._dbusservice["/System/MaxVoltageCellId"] = self._bms.highest_cell_voltage_num
-            self._dbusservice["/System/MinCellTemperature"] = self._bms.lowest_cell_temperature
-            self._dbusservice["/System/MinTemperatureCellId"] = self._bms.lowest_cell_temperature_num
-            self._dbusservice["/System/MaxCellTemperature"] = self._bms.highest_cell_temperature
-            self._dbusservice["/System/MaxTemperatureCellId"] = self._bms.highest_cell_temperature_num
+            self._dbusservice["/ConsumedAmphours"] = self.consumed_ah
+            self._dbusservice["/Capacity"] = round(self.energy_stored/1000, 1)
+            self._dbusservice["/InstalledCapacity"] = self.capacity
+            self._dbusservice['/TimeToGo'] = self.time_to_go
+            self._dbusservice["/Dc/0/Voltage"] = self.battery_voltage
+            self._dbusservice["/Dc/0/Current"] = self.battery_current
+            self._dbusservice["/Dc/0/Power"] = self.battery_voltage * self.battery_current
+            self._dbusservice["/Dc/0/Temperature"] = self.highest_cell_temperature
+            self._dbusservice["/Io/AllowToCharge"] = int(self.allowed_to_charge)
+            self._dbusservice["/Io/AllowToDischarge"] = int(self.allowed_to_discharge)
+            self._dbusservice["/System/MinCellVoltage"] = round(self.lowest_cell_voltage, 2)
+            self._dbusservice["/System/MinVoltageCellId"] = self.lowest_cell_voltage_num
+            self._dbusservice["/System/MaxCellVoltage"] = round(self.highest_cell_voltage, 2)
+            self._dbusservice["/System/MaxVoltageCellId"] = self.highest_cell_voltage_num
+            self._dbusservice["/System/MinCellTemperature"] = self.lowest_cell_temperature
+            self._dbusservice["/System/MinTemperatureCellId"] = self.lowest_cell_temperature_num
+            self._dbusservice["/System/MaxCellTemperature"] = self.highest_cell_temperature
+            self._dbusservice["/System/MaxTemperatureCellId"] = self.highest_cell_temperature_num
             self._dbusservice["/System/NrOfModulesOnline"] = 1
             self._dbusservice["/System/NrOfModulesOffline"] = 0
-            self._dbusservice["/System/NrOfModulesBlockingCharge"] = int(not self._bms.allowed_to_charge)
-            self._dbusservice["/System/NrOfModulesBlockingDischarge"] = int(not self._bms.allowed_to_discharge)
-            self._dbusservice["/Alarms/LowVoltage"] = int(self._bms.alarm_minimum_voltage)
-            self._dbusservice["/Alarms/HighVoltage"] = int(self._bms.alarm_maximum_voltage)
-            self._dbusservice["/Alarms/LowTemperature"] = int(self._bms.alarm_minimum_temperature)
-            self._dbusservice["/Alarms/HighTemperature"] = int(self._bms.alarm_maximum_temperature)
-            self._dbusservice["/Info/BatteryLowVoltage"] = (self._bms.cell_voltage_min * self._bms.cell_count)
-            self._dbusservice["/Info/MaxChargeVoltage"] = self._bms.max_charge_voltage
-            self._dbusservice["/Info/MaxChargeCurrent"] = self._bms.max_charge_current
-            self._dbusservice["/Info/MaxDischargeCurrent"] = self._bms.max_discharge_current
+            self._dbusservice["/System/NrOfModulesBlockingCharge"] = int(not self.allowed_to_charge)
+            self._dbusservice["/System/NrOfModulesBlockingDischarge"] = int(not self.allowed_to_discharge)
+            self._dbusservice["/Alarms/LowVoltage"] = int(self.alarm_minimum_voltage)
+            self._dbusservice["/Alarms/HighVoltage"] = int(self.alarm_maximum_voltage)
+            self._dbusservice["/Alarms/LowTemperature"] = int(self.alarm_minimum_temperature)
+            self._dbusservice["/Alarms/HighTemperature"] = int(self.alarm_maximum_temperature)
+            self._dbusservice["/Info/BatteryLowVoltage"] = (self.cell_voltage_min * self.cell_count)
+            self._dbusservice["/Info/MaxChargeVoltage"] = self.max_charge_voltage
+            self._dbusservice["/Info/MaxChargeCurrent"] = self.max_charge_current
+            self._dbusservice["/Info/MaxDischargeCurrent"] = self.max_discharge_current
     
     def _settext(self, path, value): # Currently only used for CustomName
         self._settings['CustomName'] = value
@@ -493,14 +407,159 @@ class SmartBMSDbus():
                 'CustomName': ['/Settings/123electric/Products/'+ self._serial_id + '/CustomName', self._info['name'], 0, 0]
                 },
                 eventCallback = lambda: "True")
+    
+    def _handleservicechange(self):
+		self._changed = True
+
+    def _dbus_value_changed(self, dbusServiceName, dbusPath, dict, changes, deviceInstance):
+		self._changed = True
+
+		# Workaround because com.victronenergy.vebus is available even when there is no vebus product
+		# connected.
+		if (dbusPath in ['/Connected', '/ProductName', '/Mgmt/Connection'] or
+			(dbusPath == '/State' and dbusServiceName.split('.')[0:3] == ['com', 'victronenergy', 'vebus'])):
+			self._handleservicechange()
+
+	def _device_added(self, service, instance, do_service_change=True):
+		if do_service_change:
+			self._handleservicechange()
+
+	def _device_removed(self, service, instance):
+		self._handleservicechange()
+                
+    def _get_connected_service_list(self, classfilter=None):
+		services = self._dbusmonitor.get_service_list(classfilter=classfilter)
+		return services
+    
+    def _get_active_bms(self):
+        batteries = self._get_connected_service_list('com.victronenergy.battery')
+        
+                
+    def _update_time_to_go(self):
+        # Filter current with a 3 minute moving average filter to stabilize the time-to-go
+        if len(self._current_filter) >= 180:
+            self._current_filter.popleft()
+        self._current_filter.append(self.battery_current)
+        
+        current_filter_sum = 0
+        for value in self._current_filter:
+            current_filter_sum += value
+        current_filter_average = current_filter_sum/len(self._current_filter)
+        battery_power_filtered = (self.nominal_battery_voltage * -1 * current_filter_average)
+        normalized_power = self.capacity*1000*0.05 # The battery capacity was rated at a current of <= 0.05C -> calculate this measurement current (in wh)
+        if current_filter_average < 0 and battery_power_filtered > 0 and normalized_power > 0 and self.capacity > 0: # > 0 to avoid divide by zero
+            # When discharge power is bigger than normalized current, use Peukert-like formula
+            if battery_power_filtered > normalized_power:
+                time_to_go_from_full =  60 * 60 * (self.capacity*1000)/(pow(battery_power_filtered/normalized_power, 1.02))/normalized_power
+                time_to_go = time_to_go_from_full*(self.energy_stored/(self.capacity*1000))
+            else:
+                time_to_go = self.energy_stored * 60 * 60 / battery_power_filtered
+            self.time_to_go = time_to_go
+        else:
+            self.time_to_go = None
+            
+    
+    def _unbalance_check(self):
+        battery_current_balancing = self.battery_current - 1 # When all cells balance, the charge current is 1A lower because of passive balancing
+        if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current_balancing < self.capacity_ah*0.05:
+            self._battery_full_counter += 1
+        else:
+            self._battery_full_counter = 0
+        
+        if self._battery_full_counter >= 10 and self.soc == 100: # When BMS also sees the pack as full
+            self._balance_state = self.BALANCE_STATE_BALANCED
+        
+        # Battery idle and unbalance of more than 40mV
+        if self.capacity_ah*-0.05 < battery_current_balancing < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.04:
+            self._unbalance_detection_timer += 1
+        else:
+            self._unbalance_detection_timer = 0
+        
+        # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
+        if self._unbalance_detection_timer > 60:
+            self._balance_state = self.BALANCE_STATE_UNBALANCED
+        
+         # At least balance once a week
+        if self._balance_state == self.BALANCE_STATE_BALANCED:
+            self._balanced_timer += 1
+            if self._balanced_timer >= 7*24*60*60:
+                self._balance_state = self.BALANCE_STATE_UNBALANCED
+                self._balanced_timer = 0
+    
+    def _calculate_current_limits(self):
+        if self.alarm_cell_communication or self.alarm_serial_communication:
+            max_discharge_current = 0
+            max_charge_current = 0
+            return
+        
+        # Discharge - very simple algorithm, may need control loop for better results
+        discharge_limit = self.capacity_ah*self.BATTERY_DISCHARGE_MAX_RATING
+        if not self.allowed_to_discharge:
+            self.max_discharge_current = 0
+        elif self.lowest_cell_voltage - 0.05 <= self.cell_voltage_min:
+            self.max_discharge_current = 0
+        elif self.soc <= 10:
+            self.max_discharge_current = round(discharge_limit/8, 1)
+        elif 10 < self.soc <= 20:
+            self.max_discharge_current = round(discharge_limit/4, 1)
+        elif 20 < self.soc <= 25:
+            self.max_discharge_current = round(discharge_limit/2, 1)
+        elif 25 < self.soc <= 30:
+            self.max_discharge_current = round(discharge_limit/1.5, 1)
+        else:
+            self.max_discharge_current = round(discharge_limit, 1)
+        
+        # Charge
+        # Fixed charge current - when pack is full, regulate the voltage
+        if not self.allowed_to_charge:
+            self.max_charge_current = 0
+        elif self.highest_cell_voltage+0.05 >= self.cell_voltage_max: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
+            self.max_charge_current = 0
+        else:
+            self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING
+        
+        #print('')
+        if self._balance_state == self.BALANCE_STATE_UNBALANCED:
+            highest_cell_voltage_target = round(self.cell_voltage_full + 0.005, 3)
+            voltage_upper_limit_cell_margin = 0.035
+            voltage_upper_limit = (highest_cell_voltage_target + voltage_upper_limit_cell_margin) * self.cell_count
+            # If code just started, set value to default
+            if(self.max_charge_voltage == 0): self.max_charge_voltage = voltage_upper_limit
+            
+            #print('Highest cell voltage target:\t{}'.format(highest_cell_voltage_target))
+            #print('Highest cell voltage:\t\t{}'.format(self.highest_cell_voltage))
+            # When battery is ~unbalanced, charge to a point where all cells are balancing.
+            # When the battery is balanced, charge to a voltage a little lower so no balancing energy is wasted
+            charge_voltage_controller_kp = 0.1
+            charge_voltage_controller_ki = 0.03
+            charge_voltage_controller_setpoint = highest_cell_voltage_target
+            charge_voltage_controller_input = self.highest_cell_voltage
+            charge_voltage_controller_error = charge_voltage_controller_setpoint - charge_voltage_controller_input # Negative value when over full threshold - example: -0.1 (100mV over threshold)
+            if charge_voltage_controller_error <= 0:
+                self._charge_voltage_controller_integral = self._charge_voltage_controller_integral + charge_voltage_controller_error
+            else: # positive error, slowly rise
+                self._charge_voltage_controller_integral = self._charge_voltage_controller_integral + (0.0001/charge_voltage_controller_ki)
+            # limit integral, only lower voltage when needed
+            if self._charge_voltage_controller_integral*charge_voltage_controller_ki > voltage_upper_limit_cell_margin: self._charge_voltage_controller_integral = voltage_upper_limit_cell_margin/charge_voltage_controller_ki
+            if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.2: self._charge_voltage_controller_integral = -0.2/charge_voltage_controller_ki
+            #print('Controller error:\t\t{}'.format(charge_voltage_controller_error))
+            #print('Controller integral:\t\t{}'.format(self._charge_voltage_controller_integral))
+            charge_voltage_controller_output = round(charge_voltage_controller_kp * charge_voltage_controller_error + charge_voltage_controller_ki * self._charge_voltage_controller_integral, 3)
+            #print('Controller ouput:\t\t{}'.format(charge_voltage_controller_output))
+            charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output) * self.cell_count, 2)
+            self.max_charge_voltage = charge_voltage if charge_voltage < voltage_upper_limit else voltage_upper_limit
+        else:
+            self.max_charge_voltage = ((self.cell_voltage_full - 0.04) * self.cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
+            charge_voltage_controller_ki = 0 # Reset controller
+        
+        #print('Charge voltage:\t{}'.format(self.max_charge_voltage))
 
 # Called on a one second timer
 def handle_timer_tick():
     # The BMS data readout and variable writing happens on a different thread -> lock before
-    bms.lock.acquire()
-    bms.update()
+    bms_dbus.lock.acquire()
     bms_dbus.update()
-    bms.lock.release()
+    bms_dbus.lock.release()
     return True  # keep timer running
 
 if __name__ == "__main__":  
@@ -519,8 +578,7 @@ if __name__ == "__main__":
         device_serial_numbers[d.device] = d.serial_number
 
     mainloop = GLib.MainLoop()
-    bms = SmartBMS(args.device, mainloop)
-    bms_dbus = SmartBMSDbus(bms, args.device, device_serial_numbers[args.device])
+    bms_dbus = SmartBMSDbus(mainloop, args.device, device_serial_numbers[args.device])
 
     time.sleep(3) # Wait until we have received some data
 

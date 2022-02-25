@@ -47,6 +47,11 @@ if [ $scriptAction == 'INSTALL' ] ; then
 	rm -rf /data/smartbms
 	rm -rf /data/smartbms-venus
 	# End removing legacy files
+	
+	# If called for first time, remove install URL
+	if [ -f "/data/rcS.local" ]; then
+		sed -i -e 's|/data/123SmartBMS-Venus/setup reinstall||g' /data/rcS.local
+	fi
 
 	# install service template to be used by serial-starter
 	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
