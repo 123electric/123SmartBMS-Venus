@@ -171,7 +171,7 @@ class SmartBMS:
         
         #print('')
         if self._balance_state == self.BALANCE_STATE_UNBALANCED:
-            highest_cell_voltage_target = round(self.cell_voltage_full + 0.005, 3)
+            highest_cell_voltage_target = round(self.cell_voltage_full + 0.01, 3)
             voltage_upper_limit_cell_margin = 0.035
             voltage_upper_limit = (highest_cell_voltage_target + voltage_upper_limit_cell_margin) * self.cell_count
             # If code just started, set value to default
@@ -342,7 +342,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 1.01
+            'version'    : 1.02
         }
         
         device_port = args.device[dev.rfind('/') + 1:]
