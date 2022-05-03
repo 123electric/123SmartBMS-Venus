@@ -39,16 +39,20 @@ class SmartBMSDbus(SmartBMS):
                 '/Mgmt/Connection': dummy,
                 '/DeviceInstance': dummy,
                 '/Dc/0/Voltage': dummy,
-                '/Dc/1/Voltage': dummy,
                 '/Dc/0/Current': dummy,
                 '/Dc/0/Power': dummy,
                 '/Soc': dummy,
-                '/Sense/Current': dummy,
                 '/TimeToGo': dummy,
                 '/ConsumedAmphours': dummy,
                 '/ProductId': dummy,
-                '/CustomName': dummy},
+                '/CustomName': dummy,
+                '/System/MinCellVoltage': dummy,
+                '/System/MaxCellVoltage': dummy},
                 'com.victronenergy.system': {
+                '/Connected': dummy,
+                '/ProductName': dummy,
+                '/Mgmt/Connection': dummy,
+                '/DeviceInstance': dummy,
                 '/Dc/Battery/Soc': dummy
                 }
         }
@@ -59,9 +63,19 @@ class SmartBMSDbus(SmartBMS):
             deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
     
     def update(self):
-        self._get_active_bms()
-        print(self._dbusmonitor.get_service_list('com.victronenergy.vebus'))
-    
+        print('Scanning...')
+        batteries = self._get_connected_batteries()
+        for bms in batteries:
+            print('Found ' + bms)
+        
+    @property    
+    def is_master(self):
+        battery_list = self._get_connected_batteries()
+        s = sorted((value, key) for (key, value) in battery_list.items())
+        # The device with lowest instance is the master
+        master_id = s[0][0]
+        return self._device_instance == master_id
+        
     def _handleservicechange(self):
         self._changed = True
 
@@ -75,7 +89,7 @@ class SmartBMSDbus(SmartBMS):
             self._handleservicechange()
 
     def _device_added(self, service, instance, do_service_change=True):
-        print('Device Added')
+        print('Device Added') 
         if do_service_change:
             self._handleservicechange()
 
@@ -87,11 +101,39 @@ class SmartBMSDbus(SmartBMS):
         services = self._dbusmonitor.get_service_list(classfilter=classfilter)
         return services
     
-    def _get_active_bms(self):
-        batteries = self._get_connected_service_list('com.victronenergy.battery')
-        print('Batteries: ')
-        print(batteries)
-        #print('Charge voltage:\t{}'.format(self.max_charge_voltage))
+    def _get_connected_batteries(self):
+        batteries = self._get_connected_service_list('com.victronenergy.battery').items()
+        bms_list = []
+        for battery in batteries:
+            product_name = self._dbusmonitor.get_value(battery[0], '/ProductName')
+            connected = self._dbusmonitor.get_value(battery[0], '/Connected')
+            if product_name == '123SmartBMS' and connected == 1:
+                bms_list.append(battery[0])
+        
+        return bms_list
+        
+    def _get_system_soc(self):
+        soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
+        print(soc)
+        return soc
+        
+    def _get_lowest_battery_cell_voltage(self):
+        battery_list = self._get_connected_batteries()
+        lowest_voltage = None
+        for battery in battery_list:
+            battery_lowest_voltage = self._dbusmonitor.get_value(battery, '/System/MinCellVoltage')
+            if battery_lowest_voltage != None and (lowest_voltage == None or battery_lowest_voltage < lowest_voltage):
+                lowest_voltage = battery_lowest_voltage
+        return lowest_voltage
+    
+    def _get_highest_battery_cell_voltage(self):
+        battery_list = self._get_connected_batteries()
+        highest_voltage = None
+        for battery in battery_list:
+            battery_highest_voltage = self._dbusmonitor.get_value(battery, '/System/MaxCellVoltage')
+            if battery_highest_voltage != None and (highest_voltage == None or battery_highest_voltage > highest_voltage):
+                highest_voltage = battery_highest_voltage
+        return highest_voltage
 
 # Called on a one second timer
 def handle_timer_tick():
