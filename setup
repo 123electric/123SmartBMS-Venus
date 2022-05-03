@@ -53,10 +53,14 @@ if [ $scriptAction == 'INSTALL' ] ; then
 		sed -i -e 's|/data/123SmartBMS-Venus/setup reinstall||g' /data/rcS.local
 	fi
 
-	# install service template to be used by serial-starter
+	# Install worker service template to be used by serial-starter
 	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
 	mkdir /opt/victronenergy/service-templates/smartbms-dbus
 	cp -r /data/123SmartBMS-Venus/workerService/* /opt/victronenergy/service-templates/smartbms-dbus
+	
+	# Install manager service
+	installService $packageName
+	
 	rebootNeeded=true
 fi
 
@@ -66,5 +70,8 @@ if [ $scriptAction == 'UNINSTALL' ] ; then
 
 	# remove service template
 	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
+	
+	# Remove manager service
+	removeService $packageName
 fi
 endScript
