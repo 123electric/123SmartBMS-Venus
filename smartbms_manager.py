@@ -33,7 +33,7 @@ class SmartBMSToDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0,
-            'version'    : 0.1
+            'version'    : 1.03
         }
         
         dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
@@ -164,8 +164,16 @@ class SmartBMSToDbus:
         self._scan_connected_smartbmses()
         self._remove_disconnected_bmses()
         self._determine_managed_smartbmses()
+        bms_having_lowest_voltage = self._get_bmses_having_lowest_voltage()
+        bms_having_highest_voltage = self._get_bmses_having_highest_voltage()
+        bms_having_lowest_temperature = self._get_bmses_having_lowest_temperature()
+        bms_having_highest_temperature = self._get_bmses_having_highest_temperature()
 
-        if len(self._managed_smartbmses) == 0:
+        if len(self._managed_smartbmses) == 0 \
+        or bms_having_lowest_voltage == None \
+        or bms_having_highest_voltage == None \
+        or bms_having_lowest_temperature == None \
+        or bms_having_highest_temperature == None:
             self._dbusservice["/Soc"] = None
             #self._dbusservice["/SystemSwitch"] = None
             self._dbusservice["/ConsumedAmphours"] = None
@@ -207,19 +215,15 @@ class SmartBMSToDbus:
             self._dbusservice["/Dc/0/Voltage"] = self._get_bmses_average_voltage()
             self._dbusservice["/Dc/0/Current"] = self._get_bmses_sum_current()
             self._dbusservice["/Dc/0/Power"] = self._get_bmses_sum_power()
-            self._dbusservice["/Dc/0/Temperature"] = self._get_bmses_having_highest_temperature().highest_temperature
+            self._dbusservice["/Dc/0/Temperature"] = bms_having_highest_temperature.highest_temperature
             #self._dbusservice["/Io/AllowToCharge"] = int(self.allowed_to_charge)
             #self._dbusservice["/Io/AllowToDischarge"] = int(self.allowed_to_discharge)
-            bms_having_lowest_voltage = self._get_bmses_having_lowest_voltage()
             self._dbusservice["/System/MinCellVoltage"] = bms_having_lowest_voltage.lowest_voltage
             self._dbusservice["/System/MinVoltageCellId"] = '[' + bms_having_lowest_voltage.custom_name[:12] + '] ' + str(bms_having_lowest_voltage.lowest_voltage_num)
-            bms_having_highest_voltage = self._get_bmses_having_highest_voltage()
             self._dbusservice["/System/MaxCellVoltage"] = bms_having_highest_voltage.highest_voltage
             self._dbusservice["/System/MaxVoltageCellId"] =  '[' + bms_having_highest_voltage.custom_name[:12] + '] ' + str(bms_having_highest_voltage.highest_voltage_num)
-            bms_having_lowest_temperature = self._get_bmses_having_lowest_temperature()
             self._dbusservice["/System/MinCellTemperature"] = bms_having_lowest_temperature.lowest_temperature
             self._dbusservice["/System/MinTemperatureCellId"] = '[' + bms_having_lowest_temperature.custom_name[:12] + '] ' + str(bms_having_lowest_temperature.lowest_temperature_num)
-            bms_having_highest_temperature = self._get_bmses_having_highest_temperature()
             self._dbusservice["/System/MaxCellTemperature"] = bms_having_highest_temperature.highest_temperature
             self._dbusservice["/System/MaxTemperatureCellId"] = '[' + bms_having_highest_temperature.custom_name[:12] + '] ' + str(bms_having_lowest_temperature.highest_temperature_num)
             self._dbusservice["/System/NrOfModulesOnline"] = len(self._managed_smartbmses)
@@ -488,13 +492,18 @@ class SmartBMSToDbus:
         return blocking
         
     def _calculate_current_limits(self):
-        system_lowest_cell_voltage = self._get_bmses_having_lowest_voltage().lowest_voltage
-        system_highest_cell_voltage = self._get_bmses_having_highest_voltage().highest_voltage
-        
-        if self._get_bmses_sum_communication_error() > 0:
-            max_discharge_current = 0
-            max_charge_current = 0
+        lowest_cell_voltage_bms = self._get_bmses_having_lowest_voltage()
+        highest_cell_voltage_bms = self._get_bmses_having_highest_voltage()
+
+        # One or more BMS have an error, or no BMS found? Set limits to zero
+        if self._get_bmses_sum_communication_error() > 0 or lowest_cell_voltage_bms == None or highest_cell_voltage_bms == None:
+            self.max_discharge_current = 0
+            self.max_charge_current = 0
+            self.max_charge_voltage = None
             return
+
+        system_lowest_cell_voltage = lowest_cell_voltage_bms.lowest_voltage
+        system_highest_cell_voltage = highest_cell_voltage_bms.highest_voltage
         
         # Calculate total, connected capacity for charging
         charge_capacity_sum = 0
@@ -525,9 +534,7 @@ class SmartBMSToDbus:
         
         # Charge
         # Fixed charge current - when pack is full, regulate the voltage
-        if system_highest_cell_voltage == None:
-            self.max_charge_current = 0
-        elif system_highest_cell_voltage+0.05 >= self._get_bmses_cell_voltage_max(): # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
+        if system_highest_cell_voltage+0.05 >= self._get_bmses_cell_voltage_max(): # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
             self.max_charge_current = 0
         else:
             self.max_charge_current = charge_capacity_sum*self.BATTERY_CHARGE_MAX_RATING
