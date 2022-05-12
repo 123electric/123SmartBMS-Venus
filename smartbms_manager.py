@@ -332,7 +332,7 @@ class SmartBMSToDbus:
     def _get_bmses_having_lowest_voltage(self):
         bms_found = None
         lowest_voltage = None
-        for bms in self._connected_smartbmses:
+        for bms in self._managed_smartbmses:
             bms_lowest_voltage = bms.lowest_voltage
             if bms_lowest_voltage != None and (lowest_voltage == None or bms_lowest_voltage < lowest_voltage):
                 bms_found = bms
@@ -342,7 +342,7 @@ class SmartBMSToDbus:
     def _get_bmses_having_highest_voltage(self):
         bms_found = None
         highest_voltage = None
-        for bms in self._connected_smartbmses:
+        for bms in self._managed_smartbmses:
             bms_highest_voltage = bms.highest_voltage
             if bms_highest_voltage != None and (highest_voltage == None or bms_highest_voltage > highest_voltage):
                 bms_found = bms
@@ -352,7 +352,7 @@ class SmartBMSToDbus:
     def _get_bmses_having_lowest_temperature(self):
         bms_found = None
         lowest_temperature = None
-        for bms in self._connected_smartbmses:
+        for bms in self._managed_smartbmses:
             if bms.lowest_temperature != None and (lowest_temperature == None or bms.lowest_temperature < lowest_temperature):
                 bms_found = bms
                 lowest_temperature = bms.lowest_temperature
@@ -361,7 +361,7 @@ class SmartBMSToDbus:
     def _get_bmses_having_highest_temperature(self):
         bms_found = None
         highest_temperature = None
-        for bms in self._connected_smartbmses:
+        for bms in self._managed_smartbmses:
             if bms.highest_temperature != None and (highest_temperature == None or bms.highest_temperature > highest_temperature):
                bms_found = bms
                highest_temperature = bms.highest_temperature
@@ -539,7 +539,7 @@ class SmartBMSToDbus:
         else:
             self.max_charge_current = charge_capacity_sum*self.BATTERY_CHARGE_MAX_RATING
         
-        bmses_in_bulkabsorption = list(filter(lambda b: b.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION, self._connected_smartbmses))
+        bmses_in_bulkabsorption = list(filter(lambda b: b.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION, self._managed_smartbmses))
         # When not all BMSes are in storage state (balanced): keep CVL higher so battery can fully charge
         if len(bmses_in_bulkabsorption) > 0:
             highest_cell_voltage_target = round(self._get_bmses_cell_voltage_full() + 0.01, 3)
