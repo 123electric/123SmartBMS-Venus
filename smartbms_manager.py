@@ -294,8 +294,11 @@ class SmartBMSToDbus:
     def _determine_managed_smartbmses(self):
         # Sort all connected SmartBMS'es based on cell count. All managed BMSes need to have the same cell count. Smaller batteries will not be managed
         # Match is based on biggest cell count
-        bmses_sorted = sorted(self._connected_smartbmses, key=lambda b: b.cell_count, reverse=True)
-        self._managed_smartbmses = list(filter(lambda b: b.cell_count == bmses_sorted[0].cell_count, bmses_sorted))
+        bmses = self._connected_smartbmses
+        # First filter out all BMSes which start with * symbol. This is our magical symbol to indicate we do not want this BMS to be managed
+        bmses_filter1 = list(filter(lambda b: b.custom_name[:1] != '*', bmses))
+        bmses_filter1_sorted = sorted(bmses_filter1, key=lambda b: b.cell_count, reverse=True)
+        self._managed_smartbmses = list(filter(lambda b: b.cell_count == bmses_filter1_sorted[0].cell_count, bmses_filter1_sorted))
 
     def _update_bms_data(self, bms):
         bms.last_seen = time.time()
