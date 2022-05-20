@@ -141,7 +141,7 @@ class SmartBMSToDbus:
         #self._dbusservice.add_path('/Alarms/HighVoltage',                   None)
         #self._dbusservice.add_path('/Alarms/LowTemperature',                None)
         #self._dbusservice.add_path('/Alarms/HighTemperature',               None)
-        self._dbusservice.add_path('/Info/BatteryLowVoltage',               None)
+        self._dbusservice.add_path('/Info/BatteryLowVoltage',               41.3)
         self._dbusservice.add_path('/Info/MaxChargeVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/Info/MaxChargeCurrent',                None, gettextcallback=lambda p, v: "{:.2f}A".format(v))
         self._dbusservice.add_path('/Info/MaxDischargeCurrent',             None, gettextcallback=lambda p, v: "{:.2f}A".format(v))
@@ -235,10 +235,10 @@ class SmartBMSToDbus:
 
         cell_voltage_min = self._get_bmses_cell_voltage_min()
         cell_count = self._get_bmses_cell_count()
-        if cell_voltage_min != None and cell_count != None:
-            self._dbusservice["/Info/BatteryLowVoltage"] = (cell_voltage_min+0.05) * cell_count
-        else:
-            self._dbusservice["/Info/BatteryLowVoltage"] = None
+        #if cell_voltage_min != None and cell_count != None:
+        #    self._dbusservice["/Info/BatteryLowVoltage"] = (cell_voltage_min+0.05) * cell_count
+        #else:
+        #    self._dbusservice["/Info/BatteryLowVoltage"] = None
 
         self.timer_1000ms = 0 if self.timer_1000ms == 4 else self.timer_1000ms+1
         # Make sure updating only happens once a second
