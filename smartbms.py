@@ -151,11 +151,7 @@ class SmartBMS:
             self.max_discharge_current = 0
         elif self.lowest_cell_voltage - 0.05 <= self.cell_voltage_min:
             self.max_discharge_current = 0
-        elif self.soc <= 10:
-            self.max_discharge_current = round(discharge_limit/20, 1)
-        elif 10 < self.soc <= 20:
-            self.max_discharge_current = round(discharge_limit/4, 1)
-        elif 20 < self.soc <= 30:
+        elif self.soc <= 30:
             self.max_discharge_current = round(discharge_limit/2, 1)
         else:
             self.max_discharge_current = round(discharge_limit, 1)
