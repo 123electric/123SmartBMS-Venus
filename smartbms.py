@@ -19,6 +19,19 @@ import ve_utils
 from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 
+class MAFilter:
+    def __init__(
+        self,
+        filter_size):
+        self.buffer = array(filter_size)
+        self.pos = 0
+        self.filter_size = filter_size
+
+    def add(self, value):
+        self.buffer[pos] = value
+        self.pos = (self.pos+1) % self.filter_size
+
+
 class SmartBMSSerial:
     BMS_COMM_TIMEOUT = 10 # Seconds
     BMS_COMM_BLOCK_SIZE = 58
@@ -57,10 +70,15 @@ class SmartBMSSerial:
         self.cell_voltage_max = 0
         self.cell_voltage_full = 0
         self.time_to_go = 0
-        self.alarm_minimum_voltage = 0
-        self.alarm_maximum_voltage = 0
-        self.alarm_minimum_temperature = 0
-        self.alarm_maximum_temperature = 0
+        # Alarm counters are a filter against corrupted bit, which is on top of the checksum safety
+        self.alarm_minimum_voltage_ma_filter = 
+        self.alarm_maximum_voltage_counter = 0
+        self.alarm_minimum_temperature_counter = 0
+        self.alarm_maximum_temperature_counter = 0
+        self.alarm_minimum_voltage = False
+        self.alarm_maximum_voltage = False
+        self.alarm_minimum_temperature = False
+        self.alarm_maximum_temperature = False
         self.alarm_cell_communication = 0
         self.allowed_to_charge = None
         self.allowed_to_discharge = None
@@ -410,10 +428,10 @@ class SmartBMSToDbus(SmartBMSSerial):
             self._dbusservice["/System/HighVoltageThreshold"] = self.cell_voltage_max
             self._dbusservice["/System/FullVoltageThreshold"] = self.cell_voltage_full
             self._dbusservice["/System/NrOfCells"] = self.cell_count
-            self._dbusservice["/Alarms/LowVoltage"] = int(self.alarm_minimum_voltage)
-            self._dbusservice["/Alarms/HighVoltage"] = int(self.alarm_maximum_voltage)
-            self._dbusservice["/Alarms/LowTemperature"] = int(self.alarm_minimum_temperature)
-            self._dbusservice["/Alarms/HighTemperature"] = int(self.alarm_maximum_temperature)
+            self._dbusservice["/Alarms/LowVoltage"] = 2 if self.alarm_minimum_voltage else 0
+            self._dbusservice["/Alarms/HighVoltage"] = 2 if self.alarm_maximum_voltage else 0
+            self._dbusservice["/Alarms/LowTemperature"] = 2 if self.alarm_minimum_temperature else 0
+            self._dbusservice["/Alarms/HighTemperature"] = 2 if self.alarm_maximum_temperature else 0
         
         # Beeds to be the last thing so others know we finished updating
         self._dbusservice["/UpdateTimestamp"] = int(time.time())

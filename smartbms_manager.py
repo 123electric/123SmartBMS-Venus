@@ -136,11 +136,10 @@ class SmartBMSToDbus:
         self._dbusservice.add_path('/System/NrOfModulesOffline',            None)
         self._dbusservice.add_path('/System/NrOfModulesBlockingCharge',     None)
         self._dbusservice.add_path('/System/NrOfModulesBlockingDischarge',  None)
-        #self._dbusservice.add_path('/System/BatteryChargeState',            None) 
-        #self._dbusservice.add_path('/Alarms/LowVoltage',                    None)
-        #self._dbusservice.add_path('/Alarms/HighVoltage',                   None)
-        #self._dbusservice.add_path('/Alarms/LowTemperature',                None)
-        #self._dbusservice.add_path('/Alarms/HighTemperature',               None)
+        self._dbusservice.add_path('/Alarms/LowVoltage',                    None)
+        self._dbusservice.add_path('/Alarms/HighVoltage',                   None)
+        self._dbusservice.add_path('/Alarms/LowTemperature',                None)
+        self._dbusservice.add_path('/Alarms/HighTemperature',               None)
         self._dbusservice.add_path('/Info/BatteryLowVoltage',               None)
         self._dbusservice.add_path('/Info/MaxChargeVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/Info/MaxChargeCurrent',                None, gettextcallback=lambda p, v: "{:.2f}A".format(v))
@@ -228,8 +227,8 @@ class SmartBMSToDbus:
             self._dbusservice["/System/NrOfModulesOffline"] = 0
             self._dbusservice["/System/NrOfModulesBlockingCharge"] = self._get_bmses_nr_of_banks_blocking_charge()
             self._dbusservice["/System/NrOfModulesBlockingDischarge"] = self._get_bmses_nr_of_banks_blocking_discharge()
-            #self._dbusservice["/Alarms/LowVoltage"] = int(self.alarm_minimum_voltage)
-            #self._dbusservice["/Alarms/HighVoltage"] = int(self.alarm_maximum_voltage)
+            #self._dbusservice["/Alarms/LowVoltage"] = 0
+            #self._dbusservice["/Alarms/HighVoltage"] = 0
             #self._dbusservice["/Alarms/LowTemperature"] = int(self.alarm_minimum_temperature)
             #self._dbusservice["/Alarms/HighTemperature"] = int(self.alarm_maximum_temperature)
 
@@ -501,16 +500,22 @@ class SmartBMSToDbus:
     def _calculate_current_limits(self):
         lowest_cell_voltage_bms = self._get_bmses_having_lowest_voltage()
         highest_cell_voltage_bms = self._get_bmses_having_highest_voltage()
+        cell_voltage_min_bms = self._get_bmses_cell_voltage_min()
+        cell_voltage_max_bms = self._get_bmses_cell_voltage_max()
+        cell_voltage_full_bms = self._get_bmses_cell_voltage_full()
+        cell_count = self._get_bmses_cell_count()
+        system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
+        system_lowest_cell_voltage = lowest_cell_voltage_bms.lowest_voltage
+        system_highest_cell_voltage = highest_cell_voltage_bms.highest_voltage
 
         # One or more BMS have an error, or no BMS found? Set limits to zero
-        if self._get_bmses_sum_communication_error() > 0 or lowest_cell_voltage_bms == None or highest_cell_voltage_bms == None:
+        if self._get_bmses_sum_communication_error() > 0 or lowest_cell_voltage_bms == None or highest_cell_voltage_bms == None \
+            or system_highest_cell_voltage == None or cell_voltage_min_bms == None or cell_voltage_max_bms == None \
+            or cell_voltage_full_bms == None or cell_count == None or system_soc == None:
             self.max_discharge_current = 0
             self.max_charge_current = 0
             self.max_charge_voltage = None
             return
-
-        system_lowest_cell_voltage = lowest_cell_voltage_bms.lowest_voltage
-        system_highest_cell_voltage = highest_cell_voltage_bms.highest_voltage
         
         # Calculate total, connected capacity for charging
         charge_capacity_sum = 0
@@ -523,10 +528,8 @@ class SmartBMSToDbus:
         
         # Discharge - use SoC for discharge current
         discharge_limit = discharge_capacity_sum*self.BATTERY_DISCHARGE_MAX_RATING
-        system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
-        if self._get_bmses_cell_voltage_min() == None or system_soc == None:
-            self.max_discharge_current = 0
-        elif system_lowest_cell_voltage - 0.05 <= self._get_bmses_cell_voltage_min():
+        
+        if system_lowest_cell_voltage - 0.05 <= cell_voltage_min_bms:
             self.max_discharge_current = 0
         elif system_soc <= 10:
             self.max_discharge_current = round(discharge_limit/8, 1)
@@ -541,7 +544,7 @@ class SmartBMSToDbus:
         
         # Charge
         # Fixed charge current - when pack is full, regulate the voltage
-        if system_highest_cell_voltage+0.05 >= self._get_bmses_cell_voltage_max(): # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
+        if system_highest_cell_voltage+0.05 >= cell_voltage_max_bms: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
             self.max_charge_current = 0
         else:
             self.max_charge_current = charge_capacity_sum*self.BATTERY_CHARGE_MAX_RATING
@@ -549,9 +552,8 @@ class SmartBMSToDbus:
         bmses_in_bulkabsorption = list(filter(lambda b: b.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION, self._managed_smartbmses))
         # When not all BMSes are in storage state (balanced): keep CVL higher so battery can fully charge
         if len(bmses_in_bulkabsorption) > 0:
-            highest_cell_voltage_target = round(self._get_bmses_cell_voltage_full() + 0.01, 3)
-            voltage_upper_limit_cell_margin = 0.030
-            voltage_upper_limit = (highest_cell_voltage_target + voltage_upper_limit_cell_margin) * self._get_bmses_cell_count()
+            highest_cell_voltage_target = round(cell_voltage_full_bms + 0.02, 3)
+            voltage_upper_limit = (cell_voltage_full_bms + 0.02) * cell_count
             # If code just started, set value to default
             if(self.max_charge_voltage == 0): self.max_charge_voltage = voltage_upper_limit
             
@@ -559,29 +561,26 @@ class SmartBMSToDbus:
             #print('Highest cell voltage:\t\t{}'.format(self.highest_cell_voltage))
             # When battery is ~unbalanced, charge to a point where all cells are balancing.
             # When the battery is balanced, charge to a voltage a little lower so no balancing energy is wasted
-            charge_voltage_controller_kp = 0.1
-            charge_voltage_controller_ki = 0.03
+            charge_voltage_controller_kp = 0.2
+            charge_voltage_controller_ki = 0.005
             charge_voltage_controller_setpoint = highest_cell_voltage_target
             charge_voltage_controller_input = system_highest_cell_voltage
             charge_voltage_controller_error = charge_voltage_controller_setpoint - charge_voltage_controller_input # Negative value when over full threshold - example: -0.1 (100mV over threshold)
-            if charge_voltage_controller_error <= 0:
+            if charge_voltage_controller_error <= -0.02:
                 self._charge_voltage_controller_integral = self._charge_voltage_controller_integral + charge_voltage_controller_error
-            else: # positive error, slowly rise
-                self._charge_voltage_controller_integral = self._charge_voltage_controller_integral + (0.0001/charge_voltage_controller_ki)
+            elif charge_voltage_controller_error > 0: # positive error, slowly rise
+                self._charge_voltage_controller_integral = self._charge_voltage_controller_integral + (0.0001/charge_voltage_controller_ki)*charge_voltage_controller_error
             # limit integral, only lower voltage when needed
-            if self._charge_voltage_controller_integral*charge_voltage_controller_ki > voltage_upper_limit_cell_margin: self._charge_voltage_controller_integral = voltage_upper_limit_cell_margin/charge_voltage_controller_ki
-            if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.2: self._charge_voltage_controller_integral = -0.2/charge_voltage_controller_ki
+            if self._charge_voltage_controller_integral*charge_voltage_controller_ki > 0.1: self._charge_voltage_controller_integral = 0.1/charge_voltage_controller_ki
+            if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.1: self._charge_voltage_controller_integral = -0.1/charge_voltage_controller_ki
             #print('Controller error:\t\t{}'.format(charge_voltage_controller_error))
             #print('Controller integral:\t\t{}'.format(self._charge_voltage_controller_integral))
             charge_voltage_controller_output = round(charge_voltage_controller_kp * charge_voltage_controller_error + charge_voltage_controller_ki * self._charge_voltage_controller_integral, 3)
             #print('Controller ouput:\t\t{}'.format(charge_voltage_controller_output))
-            charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output) * self._get_bmses_cell_count(), 2)
+            charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output) * cell_count, 2)
             self.max_charge_voltage = charge_voltage if charge_voltage < voltage_upper_limit else voltage_upper_limit
         else:
-            if self._get_bmses_cell_voltage_full() != None and self._get_bmses_cell_count() != None:
-                self.max_charge_voltage = ((self._get_bmses_cell_voltage_full() - 0.04) * self._get_bmses_cell_count()) # A little under the full voltage to prevent the BMS from balancing all the time
-            else:
-                self.max_charge_voltage = 0
+            self.max_charge_voltage = ((cell_voltage_full_bms - 0.04) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
         
         #print('Charge voltage:\t{}'.format(self.max_charge_voltage))
