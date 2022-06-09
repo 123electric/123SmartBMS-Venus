@@ -99,6 +99,7 @@ class SmartBMSToDbus:
         self._dbusservice.add_path('/HardwareVersion', None)
         self._dbusservice.add_path('/Serial', '')
         self._dbusservice.add_path('/Connected',     1)
+        self._dbusservice.add_path('/CustomName', self._info['name'])
 
         # Create device list
         self._dbusservice.add_path('/Devices/0/DeviceInstance',  self._device_instance)
@@ -553,6 +554,8 @@ class SmartBMSToDbus:
         bmses_in_bulkabsorption = list(filter(lambda b: b.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION, self._managed_smartbmses))
         # When not all BMSes are in storage state (balanced): keep CVL higher so battery can fully charge
         if len(bmses_in_bulkabsorption) > 0:
+             # Really need 25mV per cell headroom because otherwise we won't get all cells at Vbalance for at least 30 seconds
+             # as the Victron can swing a little with the charge current, so sometimes a cell gets a little lower - in this case for example to 3.50V
             highest_cell_voltage_target = round(cell_voltage_full_bms + 0.025, 3)
             voltage_upper_limit = (cell_voltage_full_bms + 0.02) * cell_count
             # If code just started, set value to default
