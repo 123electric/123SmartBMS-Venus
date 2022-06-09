@@ -553,7 +553,7 @@ class SmartBMSToDbus:
         bmses_in_bulkabsorption = list(filter(lambda b: b.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION, self._managed_smartbmses))
         # When not all BMSes are in storage state (balanced): keep CVL higher so battery can fully charge
         if len(bmses_in_bulkabsorption) > 0:
-            highest_cell_voltage_target = round(cell_voltage_full_bms + 0.02, 3)
+            highest_cell_voltage_target = round(cell_voltage_full_bms + 0.025, 3)
             voltage_upper_limit = (cell_voltage_full_bms + 0.02) * cell_count
             # If code just started, set value to default
             if(self.max_charge_voltage == 0): self.max_charge_voltage = voltage_upper_limit

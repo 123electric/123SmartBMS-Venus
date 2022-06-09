@@ -270,7 +270,7 @@ class SmartBMSSerial:
                 self._battery_full_counter += 1
             else:
                 self._battery_full_counter = 0
-            if self._battery_full_counter >= 60 and self.soc == 100: # When BMS also sees the pack as full
+            if self._battery_full_counter >= 30 and self.soc == 100: # When BMS also sees the pack as full
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_STORAGE
         elif self.battery_charge_state == self.BATTERY_CHARGE_STATE_STORAGE:
             # Battery idle and unbalance of more than 40mV
@@ -283,7 +283,7 @@ class SmartBMSSerial:
             self._balanced_timer += 1
 
             # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
-            if self._unbalance_detection_timer > 60 or self._balanced_timer >= 7*24*60*60:
+            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 4*24*60*60:
                 self._unbalance_detection_timer = 0
                 self._balanced_timer = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
