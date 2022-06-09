@@ -22,15 +22,19 @@ from settingsdevice import SettingsDevice
 class MAFilter:
     def __init__(
         self,
-        filter_size):
-        self.buffer = array(filter_size)
+        filter_size,
+        initial_value):
+        self.buffer = [initial_value]*filter_size
         self.pos = 0
         self.filter_size = filter_size
 
     def add(self, value):
-        self.buffer[pos] = value
+        self.buffer[self.pos] = value
         self.pos = (self.pos+1) % self.filter_size
 
+    def get_average(self):
+        return sum(self.buffer)/self.filter_size
+ 
 
 class SmartBMSSerial:
     BMS_COMM_TIMEOUT = 10 # Seconds
@@ -71,10 +75,13 @@ class SmartBMSSerial:
         self.cell_voltage_full = 0
         self.time_to_go = 0
         # Alarm counters are a filter against corrupted bit, which is on top of the checksum safety
-        self.alarm_minimum_voltage_ma_filter = 
-        self.alarm_maximum_voltage_counter = 0
-        self.alarm_minimum_temperature_counter = 0
-        self.alarm_maximum_temperature_counter = 0
+        self.alarm_minimum_voltage_ma_filter = MAFilter(3, False)
+        self.alarm_maximum_voltage_ma_filter = MAFilter(3, False)
+        self.alarm_minimum_temperature_ma_filter = MAFilter(3, False)
+        self.alarm_maximum_temperature_ma_filter = MAFilter(3, False)
+        self.alarm_cell_communication_ma_filter = MAFilter(3, False)
+        self.allowed_to_charge_ma_filter = MAFilter(3, False)
+        self.allowed_to_discharge_ma_filter = MAFilter(3, False)
         self.alarm_minimum_voltage = False
         self.alarm_maximum_voltage = False
         self.alarm_minimum_temperature = False
@@ -179,13 +186,20 @@ class SmartBMSSerial:
                                 self.capacity_ah = 0
                                 self.energy_stored_ah = 0
                             self.energy_stored_wh = self._decode_value(buffer[34:37], 1)
-                            self.alarm_minimum_voltage = True if (buffer[30] & 0b00001000) else False
-                            self.alarm_maximum_voltage = True if (buffer[30] & 0b00010000) else False
-                            self.alarm_minimum_temperature = True if (buffer[30] & 0b00100000) else False
-                            self.alarm_maximum_temperature = True if (buffer[30] & 0b01000000) else False
-                            self.alarm_cell_communication = True if (buffer[30] & 0b00000100) else False
-                            self.allowed_to_discharge = True if (buffer[30] & 0b00000010) else False
-                            self.allowed_to_charge = True if (buffer[30] & 0b00000001) else False
+                            self.alarm_minimum_voltage_ma_filter.add(True if (buffer[30] & 0b00001000) else False)
+                            self.alarm_maximum_voltage_ma_filter.add(True if (buffer[30] & 0b00010000) else False)
+                            self.alarm_minimum_temperature_ma_filter.add(True if (buffer[30] & 0b00100000) else False)
+                            self.alarm_maximum_temperature_ma_filter.add(True if (buffer[30] & 0b01000000) else False)
+                            self.alarm_cell_communication_ma_filter.add(True if (buffer[30] & 0b00000100) else False)
+                            self.allowed_to_discharge_ma_filter.add(True if (buffer[30] & 0b00000010) else False)
+                            self.allowed_to_charge_ma_filter.add(True if (buffer[30] & 0b00000001) else False)
+                            self.alarm_minimum_voltage = self.alarm_minimum_voltage_ma_filter.get_average() > 0.5
+                            self.alarm_maximum_voltage = self.alarm_maximum_voltage_ma_filter.get_average() > 0.5
+                            self.alarm_minimum_temperature = self.alarm_minimum_temperature_ma_filter.get_average() > 0.5
+                            self.alarm_maximum_temperature = self.alarm_maximum_temperature_ma_filter.get_average() > 0.5
+                            self.alarm_cell_communication = self.alarm_cell_communication_ma_filter.get_average() > 0.5
+                            self.allowed_to_discharge = self.allowed_to_discharge_ma_filter.get_average() > 0.5
+                            self.allowed_to_charge =  self.allowed_to_charge_ma_filter.get_average() > 0.5
                             self.last_received = time.time()
                             self.lock.release()
                 
@@ -320,8 +334,8 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/TimeToGo',                             None)
         self._dbusservice.add_path('/SystemSwitch',                         None)
         self._dbusservice.add_path('/Soc',                                  None, gettextcallback=lambda p, v: "{:.0f}%%".format(v))
-        self._dbusservice.add_path('/Capacity',                             None, gettextcallback=lambda p, v: "{:.1f}kWh".format(v))
-        self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.1f}kWh".format(v))
+        self._dbusservice.add_path('/Capacity',                             None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
+        self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
         self._dbusservice.add_path('/ConsumedAmphours',                     None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
         self._dbusservice.add_path('/UpdateTimestamp',                      None)
         self._dbusservice.add_path('/Dc/0/Voltage',                         None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
@@ -478,7 +492,7 @@ if __name__ == "__main__":
     mainloop = GLib.MainLoop()
     bms_dbus = SmartBMSToDbus(mainloop, args.device, device_serial_numbers[args.device])
 
-    time.sleep(3) # Wait until we have received some data
+    time.sleep(8) # Wait until we have received some data and the filters are filled
 
     GLib.timeout_add(1000, lambda: ve_utils.exit_on_error(handle_timer_tick))
     mainloop.run()
