@@ -10,5 +10,5 @@
 . /opt/victronenergy/serial-starter/run-service.sh $tty
 
 if [ ! -h $alias ]; then ln -s /dev/$tty $alias; fi
-app="/usr/bin/python /data/smartbms/smartbms.py"
+app="/usr/bin/python /data/123SmartBMS-Venus/smartbms.py"
 start -d /dev/$tty
