@@ -300,9 +300,9 @@ class SmartBMSToDbus:
         # Match is based on biggest cell count
         bmses = self._connected_smartbmses
         # First filter out all BMSes which start with * symbol. This is our magical symbol to indicate we do not want this BMS to be managed
-        bmses_filter1 = list(filter(lambda b: b.custom_name[:1] != '*', bmses))
-        bmses_filter1_sorted = sorted(bmses_filter1, key=lambda b: b.cell_count, reverse=True)
-        self._managed_smartbmses = list(filter(lambda b: b.cell_count == bmses_filter1_sorted[0].cell_count, bmses_filter1_sorted))
+        bmses_filter1 = list(filter(lambda b: b.custom_name[:1] != '*' and b.cell_count != None, bmses)) # * is wildcard to ignore the BMS
+        bmses_sorted = sorted(bmses_filter1, key=lambda b: b.cell_count, reverse=True)
+        self._managed_smartbmses = list(filter(lambda b: b.cell_count == bmses_sorted[0].cell_count, bmses_sorted))
 
     def _update_bms_data(self, bms):
         bms.last_seen = time.time()
