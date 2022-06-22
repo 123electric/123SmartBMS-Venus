@@ -13,6 +13,25 @@
 
 source "/data/SetupHelper/CommonResources"
 
+stop_smartbms_ttys() {
+	ls /dev | grep ttyUSB | while read -r line ; do
+		dev_name=`udevadm info --query=property --name=$line | sed -n s/^ID_MODEL=//p`
+		if [ "$dev_name" = "SmartBMSToUSB" ]; then
+			/opt/victronenergy/serial-starter/stop-tty.sh $line
+		fi
+	done
+}
+
+start_smartbms_ttys() {
+	ls /dev | grep ttyUSB | while read -r line ; do
+		dev_name=`udevadm info --query=property --name=$line | sed -n s/^ID_MODEL=//p`
+		if [ "$dev_name" = "SmartBMSToUSB" ]; then
+			/opt/victronenergy/serial-starter/start-tty.sh $line
+		fi
+	done
+}
+
+
 #### end of lines to include SetupHelper
 
 rulesFile="/etc/udev/rules.d/serial-starter.rules"
@@ -20,6 +39,8 @@ ruleToAdd='ACTION=="add", ENV{ID_BUS}=="usb", ENV{ID_MODEL}=="SmartBMSToUSB", EN
 
 confToAdd='service smartbms        smartbms-dbus'
 confFile=/etc/venus/serial-starter.conf
+serialStarterCacheDir='/data/var/lib/serial-starter'
+
 
 tempFile="$scriptDir/tempFile"
 
@@ -52,7 +73,7 @@ if [ $scriptAction == 'INSTALL' ] ; then
 	if [ -f "/data/rcS.local" ]; then
 		sed -i -e 's|/data/123SmartBMS-Venus/setup reinstall||g' /data/rcS.local
 	fi
-
+	
 	# Install worker service template to be used by serial-starter
 	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
 	mkdir /opt/victronenergy/service-templates/smartbms-dbus
@@ -61,20 +82,34 @@ if [ $scriptAction == 'INSTALL' ] ; then
 	# Install manager service
 	installService $packageName
 	
-	# Let udev and serial-starter reread the modified rules
-	udevadm trigger
-	svc -t /service/serial-starter
-	
-	#rebootNeeded=true
+	versionStringToNumber "v2.90~3"
+	tempFsStartVersion=$versionNumber
+	versionStringToNumber $venusVersion
+	if  (( $versionNumber >= $tempFsStartVersion )) ; then
+		# Start procedure to make udev and Serial Starter recognise the USB cable without reboot
+		#Tell Serial Starter to unlock the SmartBMS tty if already locked
+		stop_smartbms_ttys
+		#Remove Serial Starter cache because it contains old information
+		rm -rf $serialStarterCacheDir
+		
+		# Let udev and serial-starter reread the modified rules
+		udevadm trigger --action=add
+		svc -t /service/serial-starter
+		
+		start_smartbms_ttys
+	else
+		rebootNeeded=true
+	fi
 fi
 
 if [ $scriptAction == 'UNINSTALL' ] ; then
-    restoreActiveFile "$rulesFile"
-    restoreActiveFile "$confFile"
-
+	restoreActiveFile "$rulesFile"
+	restoreActiveFile "$confFile"
+	
 	# remove service template
 	rm -rf /opt/victronenergy/service-templates/smartbms-dbus
 	
+	stop_smartbms_ttys
 	# Remove manager service
 	removeService $packageName
 	

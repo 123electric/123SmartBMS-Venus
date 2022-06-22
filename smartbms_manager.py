@@ -510,7 +510,8 @@ class SmartBMSToDbus:
 
         # One or more BMS have an error, or no BMS found? Set limits to zero
         if self._get_bmses_sum_communication_error() > 0 or lowest_cell_voltage_bms == None or highest_cell_voltage_bms == None \
-            or system_highest_cell_voltage == None or cell_voltage_min_bms == None or cell_voltage_max_bms == None \
+            or lowest_cell_voltage_bms.lowest_voltage == None or  highest_cell_voltage_bms.highest_voltage == None \
+            or cell_voltage_min_bms == None or cell_voltage_max_bms == None \
             or cell_voltage_full_bms == None or cell_count == None or soc == None:
             self.max_discharge_current = 0
             self.max_charge_current = 0
