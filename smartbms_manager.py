@@ -507,17 +507,19 @@ class SmartBMSToDbus:
         cell_count = self._get_bmses_cell_count()
         system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
         soc = system_soc if system_soc != None else self._get_bmses_soc()
-        system_lowest_cell_voltage = lowest_cell_voltage_bms.lowest_voltage
-        system_highest_cell_voltage = highest_cell_voltage_bms.highest_voltage
 
         # One or more BMS have an error, or no BMS found? Set limits to zero
         if self._get_bmses_sum_communication_error() > 0 or lowest_cell_voltage_bms == None or highest_cell_voltage_bms == None \
-            or system_highest_cell_voltage == None or cell_voltage_min_bms == None or cell_voltage_max_bms == None \
+            or lowest_cell_voltage_bms.lowest_voltage == None or  highest_cell_voltage_bms.highest_voltage == None \
+            or cell_voltage_min_bms == None or cell_voltage_max_bms == None \
             or cell_voltage_full_bms == None or cell_count == None or soc == None:
             self.max_discharge_current = 0
             self.max_charge_current = 0
             self.max_charge_voltage = None
             return
+
+        system_lowest_cell_voltage = lowest_cell_voltage_bms.lowest_voltage
+        system_highest_cell_voltage = highest_cell_voltage_bms.highest_voltage
         
         # Calculate total, connected capacity for charging
         charge_capacity_sum = 0
