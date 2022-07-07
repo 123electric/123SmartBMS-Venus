@@ -1,0 +1,19 @@
+v1.4 - 7-7-2022
+-Added extra USB lost detection as sometimes the USB could be lost but the code kept running
+
+v1.3 - 27-6-2022
+-Fixed bug in Manager which occured when a non-123 SoC was selected as main SoC
+-Added PackageManager no-reboot support from Victron VenusOS v2.90~3+
+
+v1.2 - 28-2-2022
+This is an internal version for beta testing
+-Added multi worker support with one Manager. The Manager takes the value from the Workers and calculates the DVCC values
+
+v1.1 - 23-12-2021
+-Added support for kwindrems PackageManager
+
+v1.0 - 20-12-2021
+-Added DVCC parameters
+
+v0.9 - 16-11-2021
+-First working version, displaying data on the console and VRM
