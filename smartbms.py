@@ -262,9 +262,10 @@ class SmartBMSSerial:
         for value in self._current_filter:
             current_filter_sum += value
         current_filter_average = current_filter_sum/len(self._current_filter)
-        battery_power_filtered = (self.nominal_battery_voltage * -1 * current_filter_average)
+        current_filter_ceil = round((current_filter_average-0.05)*2, 1)/2 # Round per 50mA. Add 50mA to consumption because this can be measurement error
+        battery_power_filtered = (self.nominal_battery_voltage * -1 * current_filter_ceil)
         normalized_power = self.capacity*1000*0.05 # The battery capacity was rated at a current of <= 0.05C -> calculate this measurement current (in wh)
-        if current_filter_average < 0 and battery_power_filtered > 0 and normalized_power > 0 and self.capacity > 0: # > 0 to avoid divide by zero
+        if current_filter_average <= -0.05 and battery_power_filtered > 0 and normalized_power > 0 and self.capacity > 0: # > 0 to avoid divide by zero
             # When discharge power is bigger than normalized current, use Peukert-like formula
             if battery_power_filtered > normalized_power:
                 time_to_go_from_full =  60 * 60 * (self.capacity*1000)/(pow(battery_power_filtered/normalized_power, 1.02))/normalized_power
@@ -314,7 +315,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0,
-            'version'    : 1.04
+            'version'    : 1.05
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
