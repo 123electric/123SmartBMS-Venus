@@ -33,7 +33,7 @@ class SmartBMSToDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0,
-            'version'    : 1.03
+            'version'    : 1.04
         }
         
         dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}

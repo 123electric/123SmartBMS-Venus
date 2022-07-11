@@ -50,6 +50,7 @@ class SmartBMSSerial:
         dev
     ):
         self.loop = loop
+        self.dev = dev
         
         self.last_received = 0
         self.battery_voltage = 0
@@ -119,6 +120,12 @@ class SmartBMSSerial:
     
     # Must be called every second
     def update(self):
+        # If serial is not available/lost: terminate program
+        if not self._is_com_available(self.dev):
+            print('Serial lost: terminating...')
+            self.loop.quit()
+            return
+
         self._calculate_consumed_ah()
         self._update_time_to_go()
         self._battery_charge_state()
@@ -129,6 +136,13 @@ class SmartBMSSerial:
         if not self.alarm_serial_communication and self._comm_error_shadow:
             self._comm_error_shadow = False
             print('Serial comm restored')
+
+    def _is_com_available(self, port_match):
+        available_ports = serial.tools.list_ports.comports()
+        for port in available_ports:
+            if port.device == port_match:
+                return True
+        return False
     
     def _poll(self, dev, test_packet = ''):
         try:
@@ -300,7 +314,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0,
-            'version'    : 1.03
+            'version'    : 1.04
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
@@ -469,6 +483,7 @@ class SmartBMSToDbus(SmartBMSSerial):
 # Called on a one second timer
 def handle_timer_tick():
     # The BMS data readout and variable writing happens on a different thread -> lock before
+    
     bms_dbus.lock.acquire()
     bms_dbus.update()
     bms_dbus.lock.release()
@@ -484,6 +499,7 @@ if __name__ == "__main__":
     requiredArguments.add_argument('-d', '--device', help='serial device for data (eg /dev/ttyUSB0)', required=True)
     args = parser.parse_args()
     
+    # Get the serial number of each available serial port
     dev_objects = serial.tools.list_ports.comports()
     device_serial_numbers = {}
     for d in dev_objects:
