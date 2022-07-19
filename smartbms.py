@@ -52,6 +52,8 @@ class SmartBMSSerial:
         self.loop = loop
         self.dev = dev
         
+        self.com_lost_timeout = 0
+        self.time_started = 0
         self.last_received = 0
         self.battery_voltage = 0
         self.charge_current = 0
@@ -122,9 +124,15 @@ class SmartBMSSerial:
     def update(self):
         # If serial is not available/lost: terminate program
         if not self._is_com_available(self.dev):
-            print('Serial lost: terminating...')
-            self.loop.quit()
-            return
+            # If no message received for 3 seconds and COM already lost for 3 seconds
+            if self.com_lost_timeout > 3 and self.last_received + 3 < time.time():
+                print('Serial lost: terminating...')
+                self.loop.quit()
+                return
+            self.com_lost_timeout += 1
+        else:
+            self.com_lost_timeout = 0
+
 
         self._calculate_consumed_ah()
         self._update_time_to_go()
@@ -152,6 +160,7 @@ class SmartBMSSerial:
             buffer_index = 0
             time.sleep(0.5)
             self._ser = serial.Serial(dev, 9600)
+            self.time_started = time.time()
 
             while(1):
                 if len(test_packet) > 0:
@@ -262,10 +271,9 @@ class SmartBMSSerial:
         for value in self._current_filter:
             current_filter_sum += value
         current_filter_average = current_filter_sum/len(self._current_filter)
-        current_filter_ceil = round((current_filter_average-0.05)*2, 1)/2 # Round per 50mA. Add 50mA to consumption because this can be measurement error
-        battery_power_filtered = (self.nominal_battery_voltage * -1 * current_filter_ceil)
+        battery_power_filtered = (self.nominal_battery_voltage * -1 * current_filter_average)
         normalized_power = self.capacity*1000*0.05 # The battery capacity was rated at a current of <= 0.05C -> calculate this measurement current (in wh)
-        if current_filter_average <= -0.05 and battery_power_filtered > 0 and normalized_power > 0 and self.capacity > 0: # > 0 to avoid divide by zero
+        if current_filter_average < 0 and battery_power_filtered > 0 and normalized_power > 0 and self.capacity > 0: # > 0 to avoid divide by zero
             # When discharge power is bigger than normalized current, use Peukert-like formula
             if battery_power_filtered > normalized_power:
                 time_to_go_from_full =  60 * 60 * (self.capacity*1000)/(pow(battery_power_filtered/normalized_power, 1.02))/normalized_power
@@ -315,7 +323,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0,
-            'version'    : 1.05
+            'version'    : 1.04
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
