@@ -52,6 +52,8 @@ class SmartBMSSerial:
         self.loop = loop
         self.dev = dev
         
+        self.com_lost_timeout = 0
+        self.time_started = 0
         self.last_received = 0
         self.battery_voltage = 0
         self.charge_current = 0
@@ -122,9 +124,15 @@ class SmartBMSSerial:
     def update(self):
         # If serial is not available/lost: terminate program
         if not self._is_com_available(self.dev):
-            print('Serial lost: terminating...')
-            self.loop.quit()
-            return
+            # If no message received for 3 seconds and COM already lost for 3 seconds
+            if self.com_lost_timeout > 3 and self.last_received + 3 < time.time():
+                print('Serial lost: terminating...')
+                self.loop.quit()
+                return
+            self.com_lost_timeout += 1
+        else:
+            self.com_lost_timeout = 0
+
 
         self._calculate_consumed_ah()
         self._update_time_to_go()
@@ -152,6 +160,7 @@ class SmartBMSSerial:
             buffer_index = 0
             time.sleep(0.5)
             self._ser = serial.Serial(dev, 9600)
+            self.time_started = time.time()
 
             while(1):
                 if len(test_packet) > 0:
@@ -314,7 +323,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0,
-            'version'    : 1.04
+            'version'    : 1.05
         }
 
         device_port = args.device[dev.rfind('/') + 1:]

@@ -1,3 +1,7 @@
+v1.5 - 19-7-2022
+-Smoothed TTG for low current to reduce the large fluctuations
+-Added USB lost timeout because the detection sometimes falsely trigged the software shutdown
+
 v1.4 - 7-7-2022
 -Added extra USB lost detection as sometimes the USB could be lost but the code kept running
 
