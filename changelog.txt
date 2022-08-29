@@ -1,3 +1,8 @@
+v1.6 - 25-8-2022
+-Added PI loop for undervoltage protection to keep the lowest cell a little above Vmin
+-Decreased rebalance time from 4 days to 1 day to get the max
+-Increased CVL after fully balanced, a little higher to keep the cells more charged
+
 v1.5 - 19-7-2022
 -Smoothed TTG for low current to reduce the large fluctuations
 -Added USB lost timeout because the detection sometimes falsely trigged the software shutdown

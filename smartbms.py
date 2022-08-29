@@ -306,7 +306,7 @@ class SmartBMSSerial:
             self._balanced_timer += 1
 
             # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
-            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 4*24*60*60:
+            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 1*24*60*60:
                 self._unbalance_detection_timer = 0
                 self._balanced_timer = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
