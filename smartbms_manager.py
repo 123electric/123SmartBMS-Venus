@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import argparse
 import os
+from os import _exit as os_exit
+from traceback import print_exc
 import struct
 import sys
 import threading
 import time
+import logging
 from collections import deque
 from datetime import datetime
 from dbus.mainloop.glib import DBusGMainLoop
@@ -293,6 +296,7 @@ class SmartBMSManagerDbus:
                     found_bms = SmartBMSDbus(self._dbusmonitor, service, device_instance)
                     self._connected_smartbmses.append(found_bms)
                     self._update_bms_data(found_bms)
+                    logging.info('New BMS found on {} - adding to BMS list. Connected BMSes count: {}'.format(found_bms.service, len(self._connected_smartbmses)))
                 else:
                     self._update_bms_data(matching_bms[0])
 
@@ -300,6 +304,7 @@ class SmartBMSManagerDbus:
         for bms in self._connected_smartbmses:
             if time.time() > bms.last_seen + self.LAST_SEEN_TIMEOUT:
                 self._connected_smartbmses.remove(bms)
+                logging.warning('BMS disappeared, removing BMS {} from list. Connected BMSes count: {}'.format(bms.service, len(self._connected_smartbmses)))
 
     def _determine_managed_smartbmses(self):
         # Sort all connected SmartBMS'es based on cell count. All managed BMSes need to have the same cell count. Smaller batteries will not be managed
@@ -308,7 +313,14 @@ class SmartBMSManagerDbus:
         # First filter out all BMSes which start with * symbol. This is our magical symbol to indicate we do not want this BMS to be managed
         bmses_filter1 = list(filter(lambda b: b.custom_name[:1] != '*' and b.cell_count != None, bmses)) # * is wildcard to ignore the BMS
         bmses_sorted = sorted(bmses_filter1, key=lambda b: b.cell_count, reverse=True)
+        managed_bmses_previous_count = len(self._managed_smartbmses)
         self._managed_smartbmses = list(filter(lambda b: b.cell_count == bmses_sorted[0].cell_count, bmses_sorted))
+        if len(self._managed_smartbmses) != managed_bmses_previous_count:
+            logging.warning('Managed BMS count changed. Total connected BMSes: {} excluded BMSes: {} Total managed BMSes: {}'.format(
+                len(self._connected_smartbmses),
+                len(bmses_filter1),
+                len( self._managed_smartbmses)
+            ))
 
     def _update_bms_data(self, bms):
         bms.last_seen = time.time()
@@ -594,7 +606,7 @@ class SmartBMSManagerDbus:
         output = bound(0, output, 100) # In percent limit
         self._discharge_voltage_controller_previous_error = error
         self.max_discharge_current *= (100-output*0.95)/100 # Never cut back 100% as this gives 0A, which gives an undervoltage warning
-        #print('Lowest cell: {:>5.2f}\tError: {:>7.3f}\tMax current: {:>6.1f}\tkp: {:>5.1f}\tki: {:>5.1f}'.format(system_lowest_cell_voltage, error, self.max_discharge_current, discharge_voltage_controller_kp*p, discharge_voltage_controller_ki*i))
+        logging.debug('Lowest cell: {:>5.2f}\tError: {:>7.3f}\tMax current: {:>6.1f}\tkp: {:>5.1f}\tki: {:>5.1f}'.format(system_lowest_cell_voltage, error, self.max_discharge_current, discharge_voltage_controller_kp*p, discharge_voltage_controller_ki*i))
 
         ############################################
         # Charge - CVL and CCL
@@ -613,10 +625,8 @@ class SmartBMSManagerDbus:
             highest_cell_voltage_target = round(cell_voltage_full_bms + 0.025, 3)
             voltage_upper_limit = (cell_voltage_full_bms + 0.02) * cell_count
             # If code just started, set value to default
-            if(self.max_charge_voltage == 0): self.max_charge_voltage = voltage_upper_limit
+            if self.max_charge_voltage == 0: self.max_charge_voltage = voltage_upper_limit
             
-            #print('Highest cell voltage target:\t{}'.format(highest_cell_voltage_target))
-            #print('Highest cell voltage:\t\t{}'.format(system_highest_cell_voltage))
             # When battery is ~unbalanced, charge to a point where all cells are balancing.
             # When the battery is balanced, charge to a voltage a little lower so no balancing energy is wasted
             charge_voltage_controller_kp = 0.4
@@ -633,17 +643,15 @@ class SmartBMSManagerDbus:
             if self._charge_voltage_controller_integral*charge_voltage_controller_ki > 0.1: self._charge_voltage_controller_integral = 0.1/charge_voltage_controller_ki
             # Testing gives result that ki*integral really sometimes needs to -0.13, so -0.15 is the minimum
             if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.15: self._charge_voltage_controller_integral = -0.15/charge_voltage_controller_ki
-            #print('Controller error:\t\t{}'.format(charge_voltage_controller_error))
-            #print('Controller integral:\t\t{}'.format(self._charge_voltage_controller_integral))
             charge_voltage_controller_output = round(charge_voltage_controller_kp * charge_voltage_controller_error + charge_voltage_controller_ki * self._charge_voltage_controller_integral, 3)
-            #print('Controller ouput:\t\t{}'.format(charge_voltage_controller_output))
             charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output) * cell_count, 2)
             self.max_charge_voltage = min(charge_voltage, voltage_upper_limit)
         else:
-            self.max_charge_voltage = ((cell_voltage_full_bms - 0.03) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
+            if cell_voltage_full_bms == 3.4 or cell_voltage_full_bms == 3.5 or cell_voltage_full_bms == 3.6: # LiFePO4
+                self.max_charge_voltage = (3.375 * cell_count)
+            else: # Other chemistries
+                self.max_charge_voltage = ((cell_voltage_full_bms - 0.05) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
-        
-        #print('Charge voltage:\t{}'.format(self.max_charge_voltage))
         
         
 class SmartBMSDbus(object):
@@ -682,9 +690,26 @@ def handle_timer_tick():
     bms_dbus.update()
     return True  # keep timer running
 
+def exit_on_error(func, *args, **kwargs):
+	try:
+		return func(*args, **kwargs)
+	except:
+		try:
+			logging.critical('exit_on_error: there was an exception. Printing stacktrace will be tried and then exit', exc_info=True)
+		except:
+			pass
+
+		# sys.exit() is not used, since that throws an exception, which does not lead to a program
+		# halt when used in a dbus callback, see connection.py in the Python/Dbus libraries, line 230.
+		os_exit(1)
+
 if __name__ == "__main__":  
     # Have a mainloop, so we can send/receive asynchronous calls to and from dbus
-    print('123\\SmartBMS Manager to dbus started')
+    # set logging level to include info level entries
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+    logger = logging.getLogger("")
+    #logger.addHandler(BufferingSMTPHandler('smartbmsmanager@victrongx.com', 'app@albertronic.com', 'New log'))
+    logger.warning('123\\SmartBMS Manager to dbus started')
     DBusGMainLoop(set_as_default=True)
 
     mainloop = GLib.MainLoop()

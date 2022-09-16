@@ -52,7 +52,6 @@ class SmartBMSSerial:
         self.loop = loop
         self.dev = dev
         
-        self.com_lost_timeout = 0
         self.time_started = 0
         self.last_received = 0
         self.battery_voltage = 0
@@ -72,6 +71,7 @@ class SmartBMSSerial:
         self.capacity = 0
         self.capacity_ah = 0
         self.energy_stored_wh = 0
+        self.energy_stored_ah = 0
         self.ah_stored = 0
         self.cell_voltage_min = 0
         self.cell_voltage_max = 0
@@ -124,15 +124,9 @@ class SmartBMSSerial:
     def update(self):
         # If serial is not available/lost: terminate program
         if not self._is_com_available(self.dev):
-            # If no message received for 3 seconds and COM already lost for 3 seconds
-            if self.com_lost_timeout > 3 and self.last_received + 3 < time.time():
-                print('Serial lost: terminating...')
-                self.loop.quit()
-                return
-            self.com_lost_timeout += 1
-        else:
-            self.com_lost_timeout = 0
-
+            print('Serial lost: terminating...')
+            self.loop.quit()
+            return
 
         self._calculate_consumed_ah()
         self._update_time_to_go()
@@ -146,11 +140,7 @@ class SmartBMSSerial:
             print('Serial comm restored')
 
     def _is_com_available(self, port_match):
-        available_ports = serial.tools.list_ports.comports()
-        for port in available_ports:
-            if port.device == port_match:
-                return True
-        return False
+        return os.path.exists(port_match)
     
     def _poll(self, dev, test_packet = ''):
         try:
@@ -323,7 +313,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0,
-            'version'    : 1.05
+            'version'    : 1.06
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
@@ -397,7 +387,8 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/CustomName', value=self._settings['CustomName'], writeable=True, onchangecallback=self._settext)
     
     def update(self):
-        super().update()
+        super().update() # Needs to be called 1x per second
+        
 
         if self.alarm_cell_communication or self.alarm_serial_communication:
             self._dbusservice["/Connected"] = 1
