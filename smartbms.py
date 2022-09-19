@@ -140,6 +140,7 @@ class SmartBMSSerial:
             print('Serial comm restored')
 
     def _is_com_available(self, port_match):
+        # Do not use serial.tools comports() call, as this can make the interface hang up. Instead, use os.path.exists
         return os.path.exists(port_match)
     
     def _poll(self, dev, test_packet = ''):
@@ -198,7 +199,6 @@ class SmartBMSSerial:
                             else:
                                 self.capacity_ah = 0
                                 self.energy_stored_ah = 0
-                            self.energy_stored_wh = self._decode_value(buffer[34:37], 1)
                             self.alarm_minimum_voltage_ma_filter.add(True if (buffer[30] & 0b00001000) else False)
                             self.alarm_maximum_voltage_ma_filter.add(True if (buffer[30] & 0b00010000) else False)
                             self.alarm_minimum_temperature_ma_filter.add(True if (buffer[30] & 0b00100000) else False)
@@ -296,7 +296,7 @@ class SmartBMSSerial:
             self._balanced_timer += 1
 
             # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
-            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 1*24*60*60:
+            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 1*11*60*60: # Also restart after 11 hours, because it is probably a new day
                 self._unbalance_detection_timer = 0
                 self._balanced_timer = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
