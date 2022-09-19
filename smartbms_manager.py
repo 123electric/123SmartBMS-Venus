@@ -648,7 +648,7 @@ class SmartBMSManagerDbus:
             self.max_charge_voltage = min(charge_voltage, voltage_upper_limit)
         else:
             if cell_voltage_full_bms == 3.4 or cell_voltage_full_bms == 3.5 or cell_voltage_full_bms == 3.6: # LiFePO4
-                self.max_charge_voltage = (3.375 * cell_count)
+                self.max_charge_voltage = (3.37 * cell_count)
             else: # Other chemistries
                 self.max_charge_voltage = ((cell_voltage_full_bms - 0.05) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller

@@ -1,7 +1,7 @@
 v1.6 - 16-9-2022
 -Added PI loop for undervoltage protection to keep the lowest cell a little above Vmin
--Decreased rebalance time from 4 days to 1 day to get the max
--Increased CVL after fully balanced, a little higher to keep the cells more charged
+-Decreased rebalance time from 4 days to 11 hours to be able to recharge
+-Set CVL to 3.37V per cell after fully charged - for LiFePO4
 -Removed USB lost timeout as it seems it was not needed
 -Changed from serial.tools.list_ports to os.path.exists to see if ttyUSB exists because list_ports seems to give a problem with GUI
 
