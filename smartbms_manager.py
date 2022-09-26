@@ -88,8 +88,8 @@ class SmartBMSManagerDbus:
         }
 
         self._device_instance = 287
-        self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
-            deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
+        #self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
+        #    deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
 
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
         
