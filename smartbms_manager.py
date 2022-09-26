@@ -78,13 +78,13 @@ class SmartBMSManagerDbus:
             #    '/System/NrOfCells': dummy,
             #    '/Io/AllowToCharge': dummy,
             #    '/Io/AllowToDischarge': dummy},
-    #            'com.victronenergy.system': {
-    #            '/Connected': dummy,
-    #            '/ProductName': dummy,
-    #            '/Mgmt/Connection': dummy,
-    #            '/DeviceInstance': dummy,
-    #            '/Dc/Battery/Soc': dummy
-    #            }
+            'com.victronenergy.system': {
+                '/Connected': dummy,
+                '/ProductName': dummy,
+                '/Mgmt/Connection': dummy,
+                '/DeviceInstance': dummy,
+                '/Dc/Battery/Soc': dummy
+                }
         }
 
         self._device_instance = 287
