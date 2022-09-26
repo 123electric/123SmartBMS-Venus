@@ -4,6 +4,7 @@ v1.6 - 16-9-2022
 -Set CVL to 3.37V per cell after fully charged - for LiFePO4
 -Removed USB lost timeout as it seems it was not needed
 -Changed from serial.tools.list_ports to os.path.exists to see if ttyUSB exists because list_ports seems to give a problem with GUI
+-Added test version like v1.6~3 to Victron version GUI display
 
 v1.5 - 19-7-2022
 -Smoothed TTG for low current to reduce the large fluctuations

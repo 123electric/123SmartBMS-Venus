@@ -39,7 +39,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0,
-            'version'    : 1.06
+            'version'    : "1.6~3"
         }
         
         dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
@@ -101,7 +101,7 @@ class SmartBMSManagerDbus:
         self._dbusservice.add_path('/DeviceInstance', self._device_instance)
         self._dbusservice.add_path('/ProductId',     self._info['id'])
         self._dbusservice.add_path('/ProductName',     self._info['name'])
-        self._dbusservice.add_path('/FirmwareVersion', self._info['version'], gettextcallback=lambda p, v: "v{:.2f}".format(v))
+        self._dbusservice.add_path('/FirmwareVersion', self._info['version'], gettextcallback=lambda p, v: "v"+v)
         self._dbusservice.add_path('/HardwareVersion', None)
         self._dbusservice.add_path('/Serial', '')
         self._dbusservice.add_path('/Connected',     1)
@@ -156,6 +156,7 @@ class SmartBMSManagerDbus:
         self._connected_smartbmses = []
         self._managed_smartbmses = []
 
+        self._battery_reaching_undervoltage_counter = 0
         self._battery_empty_counter = 0
         self._discharge_voltage_controller_previous_error = 0
         self._discharge_voltage_controller_integral = 0
@@ -566,14 +567,23 @@ class SmartBMSManagerDbus:
             self.max_discharge_current = round(discharge_limit, 1)
 
         # Extra safety trying to prevent the BMS to fully cut off the load
-        # When the battery is almost at Vmin for 3 seconds, stop discharging
-        # This 0A leads to Victron giving a Low Voltage Alarm
+        # When the battery is almost at Vmin for 3 seconds, set discharging current to very low value
+        # Then slowly let the PI algorithm let the DCL rise
+        # If the voltage stays very low, even with very low discharge current, then the battery is really empty
+        # Then set DCL to 0A, which leads to the Multiplus giving an error
+        if system_lowest_cell_voltage - 0.05 <= cell_voltage_min_bms:
+             self._battery_reaching_undervoltage_counter += 1
+        else:
+            self._battery_reaching_undervoltage_counter = 0
+        
         if system_lowest_cell_voltage - 0.05 <= cell_voltage_min_bms:
              self._battery_empty_counter += 1
         else:
             self._battery_empty_counter = 0
         
-        if self._battery_empty_counter >= 4: self.max_discharge_current = 0
+        if self._battery_empty_counter >= 30: self.max_discharge_current = 0 # Empty, give warning
+        elif self._battery_reaching_undervoltage_counter >= 4: self.max_discharge_current = 0.5 # Very low value, not giving a warning
+
         
         # PID loop to keep the lowest cell over Vmin
         discharge_voltage_controller_kp = 400
