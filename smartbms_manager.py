@@ -18,7 +18,7 @@ from gi.repository import GLib
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
 import dbus.service
 import ve_utils
-#from dbusmonitor import DbusMonitor
+from dbusmonitor import DbusMonitor
 from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 
@@ -88,8 +88,8 @@ class SmartBMSManagerDbus:
         }
 
         self._device_instance = 287
-        #self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
-        #    deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
+        self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
+            deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
 
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
         
@@ -302,7 +302,7 @@ class SmartBMSManagerDbus:
         if len(self._managed_smartbmses) != managed_bmses_previous_count:
             logging.warning('Managed BMS count changed. Total connected BMSes: {} excluded BMSes: {} Total managed BMSes: {}'.format(
                 len(self._connected_smartbmses),
-                len(self._connected_smartbmses)- len(bmses_filter1),
+                len(self._connected_smartbmses)-len(bmses_filter1),
                 len( self._managed_smartbmses)
             ))
 
