@@ -78,18 +78,18 @@ class SmartBMSManagerDbus:
                 '/System/NrOfCells': dummy,
                 '/Io/AllowToCharge': dummy,
                 '/Io/AllowToDischarge': dummy},
-                'com.victronenergy.system': {
-                '/Connected': dummy,
-                '/ProductName': dummy,
-                '/Mgmt/Connection': dummy,
-                '/DeviceInstance': dummy,
-                '/Dc/Battery/Soc': dummy
-                }
+    #            'com.victronenergy.system': {
+    #            '/Connected': dummy,
+    #            '/ProductName': dummy,
+    #            '/Mgmt/Connection': dummy,
+    #            '/DeviceInstance': dummy,
+    #            '/Dc/Battery/Soc': dummy
+    #            }
         }
 
         self._device_instance = 287
-        #self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
-        #    deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
+        self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
+            deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
 
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
         
