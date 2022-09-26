@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from importlib.machinery import SourceFileLoader
 import os
 from os import _exit as os_exit
 from traceback import print_exc
@@ -17,7 +18,7 @@ from gi.repository import GLib
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
 import dbus.service
 import ve_utils
-from dbusmonitor import DbusMonitor
+#from dbusmonitor import DbusMonitor
 from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 
@@ -87,8 +88,8 @@ class SmartBMSManagerDbus:
         }
 
         self._device_instance = 287
-        self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
-            deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
+        #self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
+        #    deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
 
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
         
@@ -276,30 +277,12 @@ class SmartBMSManagerDbus:
 
     def _device_removed(self, service, instance):
         self._handleservicechange()
-                
-    def _get_connected_service_list(self, classfilter=None):
-        services = self._dbusmonitor.get_service_list(classfilter=classfilter)
-        return services
-    
+
     def _scan_connected_smartbmses(self):
-        batteries = self._get_connected_service_list('com.victronenergy.battery').items()
-        for battery in batteries:
-            product_name = self._dbusmonitor.get_value(battery[0], '/ProductName')
-            connected = self._dbusmonitor.get_value(battery[0], '/Connected')
-            updated_timestamp = self._dbusmonitor.get_value(battery[0], '/UpdateTimestamp')
-            if product_name == '123SmartBMS' and connected == 1 and updated_timestamp != None:
-                service = battery[0]
-                device_instance = battery[1]
-                matching_bms = list(filter(lambda b: b.service == service, self._connected_smartbmses))
-                in_list = len(matching_bms)
-                if in_list == 0:
-                    # New: create new instance
-                    found_bms = SmartBMSDbus(self._dbusmonitor, service, device_instance)
-                    self._connected_smartbmses.append(found_bms)
-                    self._update_bms_data(found_bms)
-                    logging.info('New BMS found on {} - adding to BMS list. Connected BMSes count: {}'.format(found_bms.service, len(self._connected_smartbmses)))
-                else:
-                    self._update_bms_data(matching_bms[0])
+        if len(self._connected_smartbmses) < 1:
+            self._connected_smartbmses.append(SmartBMSDbus('Fake monitor', 'Fake service', 288))
+        self._update_bms_data(self._connected_smartbmses[0])
+        return
 
     def _remove_disconnected_bmses(self):
         for bms in self._connected_smartbmses:
@@ -319,40 +302,40 @@ class SmartBMSManagerDbus:
         if len(self._managed_smartbmses) != managed_bmses_previous_count:
             logging.warning('Managed BMS count changed. Total connected BMSes: {} excluded BMSes: {} Total managed BMSes: {}'.format(
                 len(self._connected_smartbmses),
-                len(bmses_filter1),
+                len(self._connected_smartbmses)- len(bmses_filter1),
                 len( self._managed_smartbmses)
             ))
 
     def _update_bms_data(self, bms):
         bms.last_seen = time.time()
-        bms.lowest_voltage = self._dbusmonitor.get_value(bms.service, '/System/MinCellVoltage')
-        bms.lowest_voltage_num = self._dbusmonitor.get_value(bms.service, '/System/MinVoltageCellId')
-        bms.highest_voltage = self._dbusmonitor.get_value(bms.service, '/System/MaxCellVoltage')
-        bms.highest_voltage_num = self._dbusmonitor.get_value(bms.service, '/System/MaxVoltageCellId')
-        bms.lowest_temperature = self._dbusmonitor.get_value(bms.service, '/System/MinCellTemperature')
-        bms.lowest_temperature_num = self._dbusmonitor.get_value(bms.service, '/System/MinTemperatureCellId')
-        bms.highest_temperature = self._dbusmonitor.get_value(bms.service, '/System/MaxCellTemperature')
-        bms.highest_temperature_num = self._dbusmonitor.get_value(bms.service, '/System/MaxTemperatureCellId')
-        bms.stored_ah = self._dbusmonitor.get_value(bms.service, '/Capacity')
-        bms.installed_capacity = self._dbusmonitor.get_value(bms.service, '/InstalledCapacity')
-        bms.battery_charge_state = self._dbusmonitor.get_value(bms.service, '/System/BatteryChargeState')
-        bms.allowed_to_charge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingCharge') == 0
-        bms.allowed_to_discharge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingDischarge') == 0
-        bms.soc = self._dbusmonitor.get_value(bms.service, '/Soc')
-        bms.voltage = self._dbusmonitor.get_value(bms.service, '/Dc/0/Voltage')
-        bms.current = self._dbusmonitor.get_value(bms.service, '/Dc/0/Current')
-        bms.power = self._dbusmonitor.get_value(bms.service, '/Dc/0/Power')
-        bms.cell_voltage_min = self._dbusmonitor.get_value(bms.service, '/System/LowVoltageThreshold')
-        bms.cell_voltage_max = self._dbusmonitor.get_value(bms.service, '/System/HighVoltageThreshold')
-        bms.cell_voltage_full = self._dbusmonitor.get_value(bms.service, '/System/FullVoltageThreshold')
-        bms.cell_count = self._dbusmonitor.get_value(bms.service, '/System/NrOfCells')
-        bms.time_to_go = self._dbusmonitor.get_value(bms.service, '/TimeToGo')
-        bms.custom_name = self._dbusmonitor.get_value(bms.service, '/CustomName')
+        bms.lowest_voltage = 3.33
+        bms.lowest_voltage_num = 3
+        bms.highest_voltage = 3.34
+        bms.highest_voltage_num = 4
+        bms.lowest_temperature = 20
+        bms.lowest_temperature_num = 4
+        bms.highest_temperature = 23
+        bms.highest_temperature_num = 8
+        bms.stored_ah = 400
+        bms.installed_capacity = 500
+        bms.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
+        bms.allowed_to_charge = True
+        bms.allowed_to_discharge = True
+        bms.soc = 84
+        bms.voltage = 24.3
+        bms.current = 10
+        bms.power = 800
+        bms.cell_voltage_min = 2.9
+        bms.cell_voltage_max = 3.8
+        bms.cell_voltage_full = 3.5
+        bms.cell_count = 8
+        bms.time_to_go = None
+        bms.custom_name = 'Kak'
         bms.communication_error = True if bms.soc == None else False
         
         
     def _get_system_soc(self):
-        soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
+        soc = 80
         return soc
         
     def _get_bmses_having_lowest_voltage(self):
@@ -524,7 +507,7 @@ class SmartBMSManagerDbus:
         cell_voltage_max_bms = self._get_bmses_cell_voltage_max()
         cell_voltage_full_bms = self._get_bmses_cell_voltage_full()
         cell_count = self._get_bmses_cell_count()
-        system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
+        system_soc = 80
         soc = system_soc if system_soc != None else self._get_bmses_soc()
 
         # One or more BMS have an error, or no BMS found? Set limits to zero
