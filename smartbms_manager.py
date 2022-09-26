@@ -45,11 +45,11 @@ class SmartBMSManagerDbus:
         
         dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
         dbus_tree = {
-            #'com.victronenergy.battery': {
-            #    '/Connected': dummy,
-            #    '/ProductName': dummy,
-            #    '/Mgmt/Connection': dummy,
-            #    '/DeviceInstance': dummy,
+            'com.victronenergy.battery': {
+                '/Connected': dummy,
+                '/ProductName': dummy,
+                '/Mgmt/Connection': dummy,
+                '/DeviceInstance': dummy,
             #    '/Dc/0/Voltage': dummy,
             #    '/Dc/0/Current': dummy,
             #    '/Dc/0/Power': dummy,
@@ -77,7 +77,7 @@ class SmartBMSManagerDbus:
             #    '/System/FullVoltageThreshold': dummy,
             #    '/System/NrOfCells': dummy,
             #    '/Io/AllowToCharge': dummy,
-            #    '/Io/AllowToDischarge': dummy},
+            },
             'com.victronenergy.system': {
                 '/Connected': dummy,
                 '/ProductName': dummy,
