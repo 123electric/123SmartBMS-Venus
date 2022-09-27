@@ -35,14 +35,26 @@ class SmartBMSManagerDbus:
     BATTERY_DISCHARGE_MAX_RATING = 1.0
     BATTERY_CHARGE_MAX_RATING = 1.0
 
-    def __init__(self, loop):
-        self._info = {
-            'name'      : "123SmartBMS Manager",
-            'servicename' : "123SmartBMSManager",
-            'id'          : 0,
-            'version'    : "1.6~3"
-        }
-        
+    def _handleservicechange(self):
+        self._changed = True
+
+    def _dbus_value_changed(self, dbusServiceName, dbusPath, dict, changes, deviceInstance):
+        self._changed = True
+
+        # Workaround because com.victronenergy.vebus is available even when there is no vebus product
+        # connected.
+        if (dbusPath in ['/Connected', '/ProductName', '/Mgmt/Connection'] or
+            (dbusPath == '/State' and dbusServiceName.split('.')[0:3] == ['com', 'victronenergy', 'vebus'])):
+            self._handleservicechange()
+
+    def _device_added(self, service, instance, do_service_change=True):
+        if do_service_change:
+            self._handleservicechange()
+
+    def _device_removed(self, service, instance):
+        self._handleservicechange()
+
+    def _monitor(self):
         dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
         dbus_tree = {
             'com.victronenergy.battery': {
@@ -50,33 +62,33 @@ class SmartBMSManagerDbus:
                 '/ProductName': dummy,
                 '/Mgmt/Connection': dummy,
                 '/DeviceInstance': dummy,
-            #    '/Dc/0/Voltage': dummy,
-            #    '/Dc/0/Current': dummy,
-            #    '/Dc/0/Power': dummy,
-            #    '/Soc': dummy,
-            #    '/TimeToGo': dummy,
-            #    '/ConsumedAmphours': dummy,
-            #    '/Capacity': dummy,
-            #    '/CustomName': dummy,
-            #    '/InstalledCapacity': dummy,
-            #   '/ProductId': dummy,
-            #    '/UpdateTimestamp': dummy,
-            #    '/System/MinCellVoltage': dummy,
-            #    '/System/MinVoltageCellId': dummy,
-            #    '/System/MaxCellVoltage': dummy,
-            #    '/System/MaxVoltageCellId': dummy,
-            #    '/System/MinCellTemperature': dummy,
-            #    '/System/MinTemperatureCellId': dummy,
-            #    '/System/MaxCellTemperature': dummy,
-            #    '/System/MaxTemperatureCellId': dummy,
-            #    '/System/NrOfModulesBlockingCharge': dummy,
-            #    '/System/NrOfModulesBlockingDischarge': dummy,
-            #    '/System/BatteryChargeState': dummy,
-            #    '/System/LowVoltageThreshold': dummy,
-            #    '/System/HighVoltageThreshold': dummy,
-            #    '/System/FullVoltageThreshold': dummy,
-            #    '/System/NrOfCells': dummy,
-            #    '/Io/AllowToCharge': dummy,
+                '/Dc/0/Voltage': dummy,
+                '/Dc/0/Current': dummy,
+                '/Dc/0/Power': dummy,
+                '/Soc': dummy,
+                '/TimeToGo': dummy,
+                '/ConsumedAmphours': dummy,
+                '/Capacity': dummy,
+                '/CustomName': dummy,
+                '/InstalledCapacity': dummy,
+               '/ProductId': dummy,
+                '/UpdateTimestamp': dummy,
+                '/System/MinCellVoltage': dummy,
+                '/System/MinVoltageCellId': dummy,
+                '/System/MaxCellVoltage': dummy,
+                '/System/MaxVoltageCellId': dummy,
+                '/System/MinCellTemperature': dummy,
+                '/System/MinTemperatureCellId': dummy,
+                '/System/MaxCellTemperature': dummy,
+                '/System/MaxTemperatureCellId': dummy,
+                '/System/NrOfModulesBlockingCharge': dummy,
+                '/System/NrOfModulesBlockingDischarge': dummy,
+                '/System/BatteryChargeState': dummy,
+                '/System/LowVoltageThreshold': dummy,
+                '/System/HighVoltageThreshold': dummy,
+                '/System/FullVoltageThreshold': dummy,
+                '/System/NrOfCells': dummy,
+                '/Io/AllowToCharge': dummy,
             },
             'com.victronenergy.system': {
                 '/Connected': dummy,
@@ -87,9 +99,25 @@ class SmartBMSManagerDbus:
                 }
         }
 
-        self._device_instance = 287
         self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
             deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
+
+        while(1):
+            time.sleep(1)
+
+    def __init__(self, loop):
+        self._info = {
+            'name'      : "123SmartBMS Manager",
+            'servicename' : "123SmartBMSManager",
+            'id'          : 0,
+            'version'    : "1.6~11"
+        }
+
+        self._monitorThread = threading.Thread(target=lambda:self._monitor())
+        self._monitorThread.daemon = True
+        self._monitorThread.start()
+
+        self._device_instance = 287
 
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
         
@@ -258,25 +286,6 @@ class SmartBMSManagerDbus:
             self._dbusservice["/Info/MaxChargeVoltage"] = self.max_charge_voltage
             self._dbusservice["/Info/MaxChargeCurrent"] = self.max_charge_current
             self._dbusservice["/Info/MaxDischargeCurrent"] = self.max_discharge_current
-
-    def _handleservicechange(self):
-        self._changed = True
-
-    def _dbus_value_changed(self, dbusServiceName, dbusPath, dict, changes, deviceInstance):
-        self._changed = True
-
-        # Workaround because com.victronenergy.vebus is available even when there is no vebus product
-        # connected.
-        if (dbusPath in ['/Connected', '/ProductName', '/Mgmt/Connection'] or
-            (dbusPath == '/State' and dbusServiceName.split('.')[0:3] == ['com', 'victronenergy', 'vebus'])):
-            self._handleservicechange()
-
-    def _device_added(self, service, instance, do_service_change=True):
-        if do_service_change:
-            self._handleservicechange()
-
-    def _device_removed(self, service, instance):
-        self._handleservicechange()
 
     def _scan_connected_smartbmses(self):
         if len(self._connected_smartbmses) < 1:
