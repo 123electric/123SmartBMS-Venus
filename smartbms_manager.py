@@ -39,7 +39,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0,
-            'version'    : "1.6~12"
+            'version'    : "1.6~13"
         }
 
         self._device_instance = 287
@@ -110,6 +110,7 @@ class SmartBMSManagerDbus:
         self._connected_smartbmses = []
         self._managed_smartbmses = []
 
+        self._system_soc = None
         self._battery_reaching_undervoltage_counter = 0
         self._battery_empty_counter = 0
         self._discharge_voltage_controller_previous_error = 0
@@ -183,6 +184,7 @@ class SmartBMSManagerDbus:
                 self._scan_connected_smartbmses()
                 self._remove_disconnected_bmses()
                 self._determine_managed_smartbmses()
+                self._system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
             time.sleep(0.2)
 
     def _get_connected_service_list(self, classfilter=None):
@@ -539,8 +541,7 @@ class SmartBMSManagerDbus:
         cell_voltage_max_bms = self._get_bmses_cell_voltage_max()
         cell_voltage_full_bms = self._get_bmses_cell_voltage_full()
         cell_count = self._get_bmses_cell_count()
-        system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
-        soc = system_soc if system_soc != None else self._get_bmses_soc()
+        soc = self._system_soc if self._system_soc != None else self._get_bmses_soc()
 
         # One or more BMS have an error, or no BMS found? Set limits to zero
         if self._get_bmses_sum_communication_error() > 0 or lowest_cell_voltage_bms == None or highest_cell_voltage_bms == None \
