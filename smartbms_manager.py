@@ -319,7 +319,7 @@ class SmartBMSManagerDbus:
         if len(self._managed_smartbmses) != managed_bmses_previous_count:
             logging.warning('Managed BMS count changed. Total connected BMSes: {} excluded BMSes: {} Total managed BMSes: {}'.format(
                 len(self._connected_smartbmses),
-                len(bmses_filter1),
+                len(self._connected_smartbmses)-len(bmses_filter1),
                 len( self._managed_smartbmses)
             ))
 

@@ -279,7 +279,7 @@ class SmartBMSSerial:
         if self.lowest_cell_voltage >= self.cell_voltage_full:
            battery_current -= 1 # When all cells balance, the charge current is 1A lower because of passive balancing
         if self.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION:
-            if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.05:
+            if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.04: # Battery is full if all cells are >= Vbalance and tail current <= 4%
                 self._battery_full_counter += 1
             else:
                 self._battery_full_counter = 0
