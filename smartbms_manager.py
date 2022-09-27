@@ -39,7 +39,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0,
-            'version'    : "1.6~13"
+            'version'    : "1.6~14"
         }
 
         self._device_instance = 287
@@ -548,8 +548,8 @@ class SmartBMSManagerDbus:
             or lowest_cell_voltage_bms.lowest_voltage == None or  highest_cell_voltage_bms.highest_voltage == None \
             or cell_voltage_min_bms == None or cell_voltage_max_bms == None \
             or cell_voltage_full_bms == None or cell_count == None or soc == None:
-            self.max_discharge_current = 0
-            self.max_charge_current = 0
+            self.max_discharge_current = None
+            self.max_charge_current = None
             self.max_charge_voltage = None
             return
 
@@ -739,8 +739,6 @@ if __name__ == "__main__":
 
     mainloop = GLib.MainLoop()
     bms_dbus = SmartBMSManagerDbus(mainloop)
-
-    time.sleep(3) # Wait until we have received some data
 
     GLib.timeout_add(200, lambda: ve_utils.exit_on_error(handle_timer_tick))
     mainloop.run()
