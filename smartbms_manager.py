@@ -39,7 +39,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0,
-            'version'    : "1.6~4"
+            'version'    : "1.6"
         }
 
         self._device_instance = 287
@@ -602,7 +602,7 @@ class SmartBMSManagerDbus:
 
         
         # PID loop to keep the lowest cell over Vmin
-        discharge_voltage_controller_kp = 400
+        discharge_voltage_controller_kp = 300
         discharge_voltage_controller_ki = 100
         discharge_voltage_controller_kd = 0 # Differential currently not implemented
         discharge_voltage_controller_setpoint = cell_voltage_min_bms+0.10
