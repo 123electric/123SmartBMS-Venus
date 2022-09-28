@@ -52,7 +52,6 @@ class SmartBMSSerial:
         self.loop = loop
         self.dev = dev
         
-        self.com_lost_timeout = 0
         self.time_started = 0
         self.last_received = 0
         self.battery_voltage = 0
@@ -72,6 +71,7 @@ class SmartBMSSerial:
         self.capacity = 0
         self.capacity_ah = 0
         self.energy_stored_wh = 0
+        self.energy_stored_ah = 0
         self.ah_stored = 0
         self.cell_voltage_min = 0
         self.cell_voltage_max = 0
@@ -124,15 +124,9 @@ class SmartBMSSerial:
     def update(self):
         # If serial is not available/lost: terminate program
         if not self._is_com_available(self.dev):
-            # If no message received for 3 seconds and COM already lost for 3 seconds
-            if self.com_lost_timeout > 3 and self.last_received + 3 < time.time():
-                print('Serial lost: terminating...')
-                self.loop.quit()
-                return
-            self.com_lost_timeout += 1
-        else:
-            self.com_lost_timeout = 0
-
+            print('Serial lost: terminating...')
+            self.loop.quit()
+            return
 
         self._calculate_consumed_ah()
         self._update_time_to_go()
@@ -146,11 +140,8 @@ class SmartBMSSerial:
             print('Serial comm restored')
 
     def _is_com_available(self, port_match):
-        available_ports = serial.tools.list_ports.comports()
-        for port in available_ports:
-            if port.device == port_match:
-                return True
-        return False
+        # Do not use serial.tools comports() call, as this can make the interface hang up. Instead, use os.path.exists
+        return os.path.exists(port_match)
     
     def _poll(self, dev, test_packet = ''):
         try:
@@ -208,7 +199,6 @@ class SmartBMSSerial:
                             else:
                                 self.capacity_ah = 0
                                 self.energy_stored_ah = 0
-                            self.energy_stored_wh = self._decode_value(buffer[34:37], 1)
                             self.alarm_minimum_voltage_ma_filter.add(True if (buffer[30] & 0b00001000) else False)
                             self.alarm_maximum_voltage_ma_filter.add(True if (buffer[30] & 0b00010000) else False)
                             self.alarm_minimum_temperature_ma_filter.add(True if (buffer[30] & 0b00100000) else False)
@@ -289,7 +279,7 @@ class SmartBMSSerial:
         if self.lowest_cell_voltage >= self.cell_voltage_full:
            battery_current -= 1 # When all cells balance, the charge current is 1A lower because of passive balancing
         if self.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION:
-            if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.05:
+            if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.04: # Battery is full if all cells are >= Vbalance and tail current <= 4%
                 self._battery_full_counter += 1
             else:
                 self._battery_full_counter = 0
@@ -306,7 +296,7 @@ class SmartBMSSerial:
             self._balanced_timer += 1
 
             # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
-            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 4*24*60*60:
+            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 1*11*60*60: # Also restart after 11 hours, because it is probably a new day
                 self._unbalance_detection_timer = 0
                 self._balanced_timer = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
@@ -323,7 +313,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0,
-            'version'    : 1.05
+            'version'    : "1.6~4"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
@@ -340,7 +330,7 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/DeviceInstance', self._device_instance)
         self._dbusservice.add_path('/ProductId',     self._info['id'])
         self._dbusservice.add_path('/ProductName',     self._info['name'])
-        self._dbusservice.add_path('/FirmwareVersion', self._info['version'], gettextcallback=lambda p, v: "v{:.2f}".format(v))
+        self._dbusservice.add_path('/FirmwareVersion', self._info['version'], self._info['version'], gettextcallback=lambda p, v: "v"+v)
         self._dbusservice.add_path('/HardwareVersion', None)
         self._dbusservice.add_path('/Serial', self._serial_id)
         self._dbusservice.add_path('/Connected', None)
@@ -397,7 +387,8 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/CustomName', value=self._settings['CustomName'], writeable=True, onchangecallback=self._settext)
     
     def update(self):
-        super().update()
+        super().update() # Needs to be called 1x per second
+        
 
         if self.alarm_cell_communication or self.alarm_serial_communication:
             self._dbusservice["/Connected"] = 1
