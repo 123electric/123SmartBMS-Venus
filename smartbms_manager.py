@@ -123,73 +123,6 @@ class SmartBMSManagerDbus:
 
         # Setup timers
         self.timer_1000ms = 0
-
-        # Lock for shared data
-        self._data_lock = threading.Lock()
-        self._monitor_thread = threading.Thread(target=lambda:self._monitor())
-        self._monitor_thread.daemon = True
-        self._monitor_thread.start()
-    
-    def _monitor(self):
-        dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
-        dbus_tree = {
-            'com.victronenergy.battery': {
-                '/Connected': dummy,
-                '/ProductName': dummy,
-                '/Mgmt/Connection': dummy,
-                '/DeviceInstance': dummy,
-                '/Dc/0/Voltage': dummy,
-                '/Dc/0/Current': dummy,
-                '/Dc/0/Power': dummy,
-                '/Soc': dummy,
-                '/TimeToGo': dummy,
-                '/ConsumedAmphours': dummy,
-                '/Capacity': dummy,
-                '/CustomName': dummy,
-                '/InstalledCapacity': dummy,
-                '/ProductId': dummy,
-                '/UpdateTimestamp': dummy,
-                '/System/MinCellVoltage': dummy,
-                '/System/MinVoltageCellId': dummy,
-                '/System/MaxCellVoltage': dummy,
-                '/System/MaxVoltageCellId': dummy,
-                '/System/MinCellTemperature': dummy,
-                '/System/MinTemperatureCellId': dummy,
-                '/System/MaxCellTemperature': dummy,
-                '/System/MaxTemperatureCellId': dummy,
-                '/System/NrOfModulesBlockingCharge': dummy,
-                '/System/NrOfModulesBlockingDischarge': dummy,
-                '/System/BatteryChargeState': dummy,
-                '/System/LowVoltageThreshold': dummy,
-                '/System/HighVoltageThreshold': dummy,
-                '/System/FullVoltageThreshold': dummy,
-                '/System/NrOfCells': dummy,
-                '/Io/AllowToCharge': dummy,
-                '/Io/AllowToDischarge': dummy},
-            'com.victronenergy.system': {
-                '/Connected': dummy,
-                '/ProductName': dummy,
-                '/Mgmt/Connection': dummy,
-                '/DeviceInstance': dummy,
-                '/Dc/Battery/Soc': dummy
-                }
-        }
-
-        self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
-            deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
-
-        while(1):
-            # Lock data before reading/writing because this is a separate thread
-            with self._data_lock:
-                self._scan_connected_smartbmses()
-                self._remove_disconnected_bmses()
-                self._determine_managed_smartbmses()
-                self._system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
-            time.sleep(0.2)
-
-    def _get_connected_service_list(self, classfilter=None):
-        services = self._dbusmonitor.get_service_list(classfilter=classfilter)
-        return services
     
     def _scan_connected_smartbmses(self):
         batteries = self._get_connected_service_list('com.victronenergy.battery').items()
@@ -210,34 +143,6 @@ class SmartBMSManagerDbus:
                     logging.info('New BMS found on {} - adding to BMS list. Connected BMSes count: {}'.format(found_bms.service, len(self._connected_smartbmses)))
                 else:
                     self._update_bms_data(matching_bms[0])
-    
-    
-    def _update_bms_data(self, bms):
-        bms.last_seen = time.time()
-        bms.lowest_voltage = self._dbusmonitor.get_value(bms.service, '/System/MinCellVoltage')
-        bms.lowest_voltage_num = self._dbusmonitor.get_value(bms.service, '/System/MinVoltageCellId')
-        bms.highest_voltage = self._dbusmonitor.get_value(bms.service, '/System/MaxCellVoltage')
-        bms.highest_voltage_num = self._dbusmonitor.get_value(bms.service, '/System/MaxVoltageCellId')
-        bms.lowest_temperature = self._dbusmonitor.get_value(bms.service, '/System/MinCellTemperature')
-        bms.lowest_temperature_num = self._dbusmonitor.get_value(bms.service, '/System/MinTemperatureCellId')
-        bms.highest_temperature = self._dbusmonitor.get_value(bms.service, '/System/MaxCellTemperature')
-        bms.highest_temperature_num = self._dbusmonitor.get_value(bms.service, '/System/MaxTemperatureCellId')
-        bms.stored_ah = self._dbusmonitor.get_value(bms.service, '/Capacity')
-        bms.installed_capacity = self._dbusmonitor.get_value(bms.service, '/InstalledCapacity')
-        bms.battery_charge_state = self._dbusmonitor.get_value(bms.service, '/System/BatteryChargeState')
-        bms.allowed_to_charge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingCharge') == 0
-        bms.allowed_to_discharge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingDischarge') == 0
-        bms.soc = self._dbusmonitor.get_value(bms.service, '/Soc')
-        bms.voltage = self._dbusmonitor.get_value(bms.service, '/Dc/0/Voltage')
-        bms.current = self._dbusmonitor.get_value(bms.service, '/Dc/0/Current')
-        bms.power = self._dbusmonitor.get_value(bms.service, '/Dc/0/Power')
-        bms.cell_voltage_min = self._dbusmonitor.get_value(bms.service, '/System/LowVoltageThreshold')
-        bms.cell_voltage_max = self._dbusmonitor.get_value(bms.service, '/System/HighVoltageThreshold')
-        bms.cell_voltage_full = self._dbusmonitor.get_value(bms.service, '/System/FullVoltageThreshold')
-        bms.cell_count = self._dbusmonitor.get_value(bms.service, '/System/NrOfCells')
-        bms.time_to_go = self._dbusmonitor.get_value(bms.service, '/TimeToGo')
-        bms.custom_name = self._dbusmonitor.get_value(bms.service, '/CustomName')
-        bms.communication_error = True if bms.soc == None else False
 
     def _handleservicechange(self):
         self._changed = True
@@ -369,8 +274,7 @@ class SmartBMSManagerDbus:
             ))
         
     def _get_system_soc(self):
-        soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
-        return soc
+        return self._system_soc
         
     def _get_bmses_having_lowest_voltage(self):
         bms_found = None
@@ -678,37 +582,6 @@ class SmartBMSManagerDbus:
             else: # Other chemistries
                 self.max_charge_voltage = ((cell_voltage_full_bms - 0.05) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
-        
-        
-class SmartBMSDbus(object):
-    def __init__(self, service, device_instance):
-        self.service = service
-        self.device_instance = device_instance
-        self.last_seen = time.time()
-        self.lowest_voltage = None
-        self.lowest_voltage_num = None
-        self.highest_voltage = None
-        self.highest_voltage_num = None
-        self.lowest_temperature = None
-        self.lowest_temperature_num = None
-        self.highest_temperature = None
-        self.highest_temperature_num = None
-        self.stored_ah = None
-        self.installed_capacity = None
-        self.soc = None
-        self.voltage = None
-        self.current = None
-        self.power = None
-        self.cell_voltage_min = None
-        self.cell_voltage_max = None
-        self.cell_voltage_full = None
-        self.cell_count = None
-        self.time_to_go = None
-        self.custom_name = None
-        self.battery_charge_state = None
-        self.allowed_to_charge = False
-        self.allowed_to_discharge = False
-        self.communication_error = False
 
 # Called on a one second timer
 def handle_timer_tick():
