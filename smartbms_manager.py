@@ -35,13 +35,14 @@ class SmartBMSManagerDbus:
     BATTERY_CHARGE_MAX_RATING = 1.0
 
     def __init__(self, loop):
+        self._loop = loop
+
         self._info = {
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0,
-            'version'    : "1.6"
+            'version'    : "1.7"
         }
-
         self._device_instance = 287
 
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
@@ -131,61 +132,67 @@ class SmartBMSManagerDbus:
         self._monitor_thread.start()
     
     def _monitor(self):
-        dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
-        dbus_tree = {
-            'com.victronenergy.battery': {
-                '/Connected': dummy,
-                '/ProductName': dummy,
-                '/Mgmt/Connection': dummy,
-                '/DeviceInstance': dummy,
-                '/Dc/0/Voltage': dummy,
-                '/Dc/0/Current': dummy,
-                '/Dc/0/Power': dummy,
-                '/Soc': dummy,
-                '/TimeToGo': dummy,
-                '/ConsumedAmphours': dummy,
-                '/Capacity': dummy,
-                '/CustomName': dummy,
-                '/InstalledCapacity': dummy,
-                '/ProductId': dummy,
-                '/UpdateTimestamp': dummy,
-                '/System/MinCellVoltage': dummy,
-                '/System/MinVoltageCellId': dummy,
-                '/System/MaxCellVoltage': dummy,
-                '/System/MaxVoltageCellId': dummy,
-                '/System/MinCellTemperature': dummy,
-                '/System/MinTemperatureCellId': dummy,
-                '/System/MaxCellTemperature': dummy,
-                '/System/MaxTemperatureCellId': dummy,
-                '/System/NrOfModulesBlockingCharge': dummy,
-                '/System/NrOfModulesBlockingDischarge': dummy,
-                '/System/BatteryChargeState': dummy,
-                '/System/LowVoltageThreshold': dummy,
-                '/System/HighVoltageThreshold': dummy,
-                '/System/FullVoltageThreshold': dummy,
-                '/System/NrOfCells': dummy,
-                '/Io/AllowToCharge': dummy,
-                '/Io/AllowToDischarge': dummy},
-            'com.victronenergy.system': {
-                '/Connected': dummy,
-                '/ProductName': dummy,
-                '/Mgmt/Connection': dummy,
-                '/DeviceInstance': dummy,
-                '/Dc/Battery/Soc': dummy
-                }
-        }
+        try:
+            dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
+            dbus_tree = {
+                'com.victronenergy.battery': {
+                    '/Connected': dummy,
+                    '/ProductName': dummy,
+                    '/Mgmt/Connection': dummy,
+                    '/DeviceInstance': dummy,
+                    '/Dc/0/Voltage': dummy,
+                    '/Dc/0/Current': dummy,
+                    '/Dc/0/Power': dummy,
+                    '/Soc': dummy,
+                    '/TimeToGo': dummy,
+                    '/ConsumedAmphours': dummy,
+                    '/Capacity': dummy,
+                    '/CustomName': dummy,
+                    '/InstalledCapacity': dummy,
+                    '/ProductId': dummy,
+                    '/UpdateTimestamp': dummy,
+                    '/System/MinCellVoltage': dummy,
+                    '/System/MinVoltageCellId': dummy,
+                    '/System/MaxCellVoltage': dummy,
+                    '/System/MaxVoltageCellId': dummy,
+                    '/System/MinCellTemperature': dummy,
+                    '/System/MinTemperatureCellId': dummy,
+                    '/System/MaxCellTemperature': dummy,
+                    '/System/MaxTemperatureCellId': dummy,
+                    '/System/NrOfModulesBlockingCharge': dummy,
+                    '/System/NrOfModulesBlockingDischarge': dummy,
+                    '/System/BatteryChargeState': dummy,
+                    '/System/LowVoltageThreshold': dummy,
+                    '/System/HighVoltageThreshold': dummy,
+                    '/System/FullVoltageThreshold': dummy,
+                    '/System/NrOfCells': dummy,
+                    '/Io/AllowToCharge': dummy,
+                    '/Io/AllowToDischarge': dummy},
+                'com.victronenergy.system': {
+                    '/Connected': dummy,
+                    '/ProductName': dummy,
+                    '/Mgmt/Connection': dummy,
+                    '/DeviceInstance': dummy,
+                    '/Dc/Battery/Soc': dummy
+                    }
+            }
 
-        self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
-            deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
+            self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
+                deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
 
-        while(1):
-            # Lock data before reading/writing because this is a separate thread
-            with self._data_lock:
-                self._scan_connected_smartbmses()
-                self._remove_disconnected_bmses()
-                self._determine_managed_smartbmses()
-                self._system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
-            time.sleep(0.2)
+            while(1):
+                # Lock data before reading/writing because this is a separate thread
+                with self._data_lock:
+                    self._scan_connected_smartbmses()
+                    self._remove_disconnected_bmses()
+                    self._determine_managed_smartbmses()
+                    self._system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
+                time.sleep(0.2)
+            
+        except Exception as e:
+            logging.critical('Fatal exception: ')
+            logging.critical(e)
+            self._loop.quit()
 
     def _get_connected_service_list(self, classfilter=None):
         services = self._dbusmonitor.get_service_list(classfilter=classfilter)
