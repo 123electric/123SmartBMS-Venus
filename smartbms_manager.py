@@ -38,7 +38,7 @@ class SmartBMSManagerDbus:
         self._info = {
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
-            'id'          : 0,
+            'id'          : 0xB050,
             'version'    : "1.6~4"
         }
 
