@@ -24,6 +24,12 @@ from settingsdevice import SettingsDevice
 def bound(low, v, high):
 	return max(low, min(v, high))
 
+def hysteresis(input, previous_output, threshold_low, threshold_high):
+    if previous_output:
+        return not (input <= threshold_low)
+    else:
+        return input >= threshold_high
+
 class SmartBMSManagerDbus:
     LAST_SEEN_TIMEOUT = 30
     
@@ -41,7 +47,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.8~2"
+            'version'    : "1.8~3"
         }
         self._device_instance = 287
 
@@ -117,6 +123,7 @@ class SmartBMSManagerDbus:
         self._discharge_voltage_controller_previous_error = 0
         self._discharge_voltage_controller_integral = 0
         self._charge_voltage_controller_integral = 0
+        self._charge_safety_cutoff_active = False
         self.charge_current_limit = 0
         self.max_charge_voltage = 0
         self.max_discharge_current = 0
@@ -645,7 +652,13 @@ class SmartBMSManagerDbus:
         # Charge - CVL and CCL
         ############################################
         # Fixed charge current - when pack is full, regulate the voltage
-        if system_highest_cell_voltage+0.05 >= cell_voltage_max_bms: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
+        
+        # If highest tcell voltage is near Vmax, switch off current
+        # Use 50mV below Vmax for critical cut off or if Vbalance is close to Vmax, take the middle
+        charge_cutoff_voltage = max(cell_voltage_max_bms-0.05, round((cell_voltage_full_bms+cell_voltage_max_bms)/2, 2))
+        charge_restore_voltage = max(cell_voltage_full_bms, charge_cutoff_voltage - 0.1)
+        self._charge_safety_cutoff_active = hysteresis(system_highest_cell_voltage, self._charge_safety_cutoff_active, charge_restore_voltage, charge_cutoff_voltage)
+        if self._charge_safety_cutoff_active: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
             self.max_charge_current = 0
         else:
             self.max_charge_current = charge_capacity_sum*self.BATTERY_CHARGE_MAX_RATING
