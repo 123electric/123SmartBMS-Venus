@@ -347,7 +347,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.8~3"
+            'version'    : "1.8~4"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
