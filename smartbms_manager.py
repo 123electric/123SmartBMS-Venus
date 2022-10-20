@@ -655,7 +655,7 @@ class SmartBMSManagerDbus:
         
         # If highest tcell voltage is near Vmax, switch off current
         # Take 2/3 of value between Vfull and Vmax as critical threshold to stop charging directly
-        charge_cutoff_voltage = cell_voltage_full_bms+(cell_voltage_max_bms-cell_voltage_full_bms)*2/3
+        charge_cutoff_voltage = max(cell_voltage_max_bms-0.05, round(cell_voltage_full_bms+(cell_voltage_max_bms-cell_voltage_full_bms)*2/3, 2))
         charge_restore_voltage = max(cell_voltage_full_bms, charge_cutoff_voltage - 0.1)
         self._charge_safety_cutoff_active = hysteresis(system_highest_cell_voltage, self._charge_safety_cutoff_active, charge_restore_voltage, charge_cutoff_voltage)
         if self._charge_safety_cutoff_active: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
