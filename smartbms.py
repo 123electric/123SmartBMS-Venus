@@ -304,7 +304,8 @@ class SmartBMSSerial:
                 self._battery_full_counter += 1
             else:
                 self._battery_full_counter = 0
-            if self._battery_full_counter >= 30 and self.soc == 100: # When BMS also sees the pack as full
+            # Battery_full_counter should really be 120 seconds at least so other systems like generators have time to see the battery as full, too
+            if self._battery_full_counter >= 120 and self.soc == 100: # When BMS also sees the pack as full
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_STORAGE
         elif self.battery_charge_state == self.BATTERY_CHARGE_STATE_STORAGE:
             # Battery idle and unbalance of more than 40mV
@@ -347,7 +348,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.8~4"
+            'version'    : "1.8~5"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
