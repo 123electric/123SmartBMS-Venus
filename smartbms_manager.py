@@ -24,6 +24,12 @@ from settingsdevice import SettingsDevice
 def bound(low, v, high):
 	return max(low, min(v, high))
 
+def hysteresis(input, previous_output, threshold_low, threshold_high):
+    if previous_output:
+        return not (input <= threshold_low)
+    else:
+        return input >= threshold_high
+
 class SmartBMSManagerDbus:
     LAST_SEEN_TIMEOUT = 30
     
@@ -40,8 +46,8 @@ class SmartBMSManagerDbus:
         self._info = {
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
-            'id'          : 0,
-            'version'    : "1.7"
+            'id'          : 0xB050,
+            'version'    : "1.8~5"
         }
         self._device_instance = 287
 
@@ -117,6 +123,7 @@ class SmartBMSManagerDbus:
         self._discharge_voltage_controller_previous_error = 0
         self._discharge_voltage_controller_integral = 0
         self._charge_voltage_controller_integral = 0
+        self._charge_safety_cutoff_active = False
         self.charge_current_limit = 0
         self.max_charge_voltage = 0
         self.max_discharge_current = 0
@@ -645,11 +652,20 @@ class SmartBMSManagerDbus:
         # Charge - CVL and CCL
         ############################################
         # Fixed charge current - when pack is full, regulate the voltage
-        if system_highest_cell_voltage+0.05 >= cell_voltage_max_bms: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
+        if system_highest_cell_voltage >= cell_voltage_max_bms - 0.01: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
             self.max_charge_current = 0
         else:
             self.max_charge_current = charge_capacity_sum*self.BATTERY_CHARGE_MAX_RATING
-        
+
+        # If highest tcell voltage is near Vmax, then lower charging voltage significantly
+        # Should not happen often, as the voltage control loop takes care of the charge voltage
+        # In case one cell is still very close to Vmax, this safety cutoff will lower the charging voltage so much that the should not charge the battery anymore
+        # Take 2/3 of value between Vfull and Vmax as critical threshold to stop charging directly
+        charge_cutoff_voltage = max(cell_voltage_max_bms-0.05, round(cell_voltage_full_bms+(cell_voltage_max_bms-cell_voltage_full_bms)*2/3, 2))
+        charge_restore_voltage = cell_voltage_full_bms # Restart charging when the cell is balanced a little more
+        self._charge_safety_cutoff_active = hysteresis(system_highest_cell_voltage, self._charge_safety_cutoff_active, charge_restore_voltage, charge_cutoff_voltage)
+        charge_safety_cutoff_voltage_reduction = -0.1 if self._charge_safety_cutoff_active else 0
+
         bmses_in_bulkabsorption = list(filter(lambda b: b.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION, self._managed_smartbmses))
         # When not all BMSes are in storage state (balanced): keep CVL higher so battery can fully charge
         if len(bmses_in_bulkabsorption) > 0:
@@ -671,19 +687,19 @@ class SmartBMSManagerDbus:
             if charge_voltage_controller_error <= -0.01:
                 self._charge_voltage_controller_integral += charge_voltage_controller_error
             elif charge_voltage_controller_error > 0: # positive error, slowly rise
-                self._charge_voltage_controller_integral += (0.0008/charge_voltage_controller_ki)*charge_voltage_controller_error
+                self._charge_voltage_controller_integral += (0.002/charge_voltage_controller_ki)*charge_voltage_controller_error
             # limit integral, only lower voltage when needed
             if self._charge_voltage_controller_integral*charge_voltage_controller_ki > 0.1: self._charge_voltage_controller_integral = 0.1/charge_voltage_controller_ki
             # Testing gives result that ki*integral really sometimes needs to -0.13, so -0.15 is the minimum
             if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.15: self._charge_voltage_controller_integral = -0.15/charge_voltage_controller_ki
             charge_voltage_controller_output = round(charge_voltage_controller_kp * charge_voltage_controller_error + charge_voltage_controller_ki * self._charge_voltage_controller_integral, 3)
-            charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output) * cell_count, 2)
+            charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output + charge_safety_cutoff_voltage_reduction) * cell_count, 2)
             self.max_charge_voltage = min(charge_voltage, voltage_upper_limit)
         else:
             if cell_voltage_full_bms == 3.4 or cell_voltage_full_bms == 3.5 or cell_voltage_full_bms == 3.6: # LiFePO4
-                self.max_charge_voltage = (3.37 * cell_count)
+                self.max_charge_voltage = ((3.37 + charge_safety_cutoff_voltage_reduction) * cell_count)
             else: # Other chemistries
-                self.max_charge_voltage = ((cell_voltage_full_bms - 0.05) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
+                self.max_charge_voltage = ((cell_voltage_full_bms - 0.05 + charge_safety_cutoff_voltage_reduction) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
         
         
