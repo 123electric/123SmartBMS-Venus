@@ -69,6 +69,9 @@ if [ $scriptAction == 'INSTALL' ] ; then
 	rm -rf /data/smartbms-venus
 	# End removing legacy files
 	
+	# Remove folder, if available, accidentally copied by SetupHelper
+	rm -rf /data/SetupHelper/.git
+	
 	# If called for first time, remove install path
 	if [ -f "/data/rcS.local" ]; then
 		sed -i -e 's|/data/123SmartBMS-Venus/setup reinstall||g' /data/rcS.local
