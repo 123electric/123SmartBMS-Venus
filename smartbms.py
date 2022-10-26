@@ -327,12 +327,7 @@ class SmartBMSSerial:
             # Partially discharged based on voltage? Reset to rebalance
             # Unbalance detected bacause at least 5 minutes in a row a voltage difference of at least 40mV? Unbalance detected. Reset to rebalance
             # Also restart after 11 hours, because it is probably a new day
-            if self.soc < 70 \
-                or self._partially_discharged_timer > 9 \
-                or self._unbalance_detection_timer > 5*60 \
-                or self._balanced_timer >= 1*11*60*60:
-                self._unbalance_detection_timer = 0
-                self._partially_discharged_timer = 0
+            if  self._balanced_timer >= 1*11*60*60:
                 self._balanced_timer = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
         else:
@@ -348,7 +343,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.8"
+            'version'    : "1.8~5"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
