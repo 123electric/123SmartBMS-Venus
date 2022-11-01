@@ -1,3 +1,7 @@
+v1.8 - 21-10-2022
+-Added extra conditions when to rebalance, to support generators which stop when the battery is totally full (around Vfull)
+-Better charge algorithm. When recharging, lower CVL extra when near Vmax. Added hysteresis for this.
+
 v1.7 - 3-10-2022
 -Bugfix: quit program when dbus thread gives exception (should not happen but for extra safety)
 

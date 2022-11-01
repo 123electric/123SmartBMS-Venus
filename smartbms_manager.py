@@ -47,7 +47,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.8"
+            'version'    : "1.9~1"
         }
         self._device_instance = 287
 
@@ -382,10 +382,6 @@ class SmartBMSManagerDbus:
                 len( self._managed_smartbmses)
             ))
         
-    def _get_system_soc(self):
-        soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
-        return soc
-        
     def _get_bmses_having_lowest_voltage(self):
         bms_found = None
         lowest_voltage = None
@@ -656,13 +652,14 @@ class SmartBMSManagerDbus:
             self.max_charge_current = 0
         else:
             self.max_charge_current = charge_capacity_sum*self.BATTERY_CHARGE_MAX_RATING
-
+        
+        highest_cell_voltage_target = round(cell_voltage_full_bms + 0.025, 3)
         # If highest tcell voltage is near Vmax, then lower charging voltage significantly
         # Should not happen often, as the voltage control loop takes care of the charge voltage
         # In case one cell is still very close to Vmax, this safety cutoff will lower the charging voltage so much that the should not charge the battery anymore
         # Take 2/3 of value between Vfull and Vmax as critical threshold to stop charging directly
         charge_cutoff_voltage = max(cell_voltage_max_bms-0.05, round(cell_voltage_full_bms+(cell_voltage_max_bms-cell_voltage_full_bms)*2/3, 2))
-        charge_restore_voltage = cell_voltage_full_bms # Restart charging when the cell is balanced a little more
+        charge_restore_voltage = highest_cell_voltage_target # Restart charging when the cell is balanced a little more. Use value of control loop so the two controls don't collide
         self._charge_safety_cutoff_active = hysteresis(system_highest_cell_voltage, self._charge_safety_cutoff_active, charge_restore_voltage, charge_cutoff_voltage)
         charge_safety_cutoff_voltage_reduction = -0.1 if self._charge_safety_cutoff_active else 0
 
@@ -671,7 +668,6 @@ class SmartBMSManagerDbus:
         if len(bmses_in_bulkabsorption) > 0:
              # Really need 25mV per cell headroom because otherwise we won't get all cells at Vbalance for at least 30 seconds
              # as the Victron can swing a little with the charge current, so sometimes a cell gets a little lower - in this case for example to 3.50V
-            highest_cell_voltage_target = round(cell_voltage_full_bms + 0.025, 3)
             voltage_upper_limit = (cell_voltage_full_bms + 0.02) * cell_count
             # If code just started, set value to default
             if self.max_charge_voltage == 0: self.max_charge_voltage = voltage_upper_limit

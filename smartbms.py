@@ -303,13 +303,14 @@ class SmartBMSSerial:
             if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.04: # Battery is full if all cells are >= Vbalance and tail current <= 4%
                 self._battery_full_counter += 1
             else:
-                self._battery_full_counter = 0
+                 # Lower instead of set to zero, so a single time value of a little under will not endlessly keep the counter go to 0
+                self._battery_full_counter = max(self._battery_full_counter-1, 0)
             # Battery_full_counter should really be 120 seconds at least so other systems like generators have time to see the battery as full, too
             if self._battery_full_counter >= 120 and self.soc == 100: # When BMS also sees the pack as full
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_STORAGE
         elif self.battery_charge_state == self.BATTERY_CHARGE_STATE_STORAGE:
             # Battery idle and unbalance of more than 40mV
-            if self.capacity_ah*-0.05 < battery_current < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.04:
+            if self.capacity_ah*-0.05 < battery_current < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.05:
                 self._unbalance_detection_timer += 1
             else:
                 self._unbalance_detection_timer = 0
@@ -329,7 +330,7 @@ class SmartBMSSerial:
             # Also restart after 11 hours, because it is probably a new day
             if self.soc < 70 \
                 or self._partially_discharged_timer > 9 \
-                or self._unbalance_detection_timer > 5*60 \
+                or self._unbalance_detection_timer > 10*60 \
                 or self._balanced_timer >= 1*11*60*60:
                 self._unbalance_detection_timer = 0
                 self._partially_discharged_timer = 0
@@ -348,7 +349,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.8"
+            'version'    : "1.9~1"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
