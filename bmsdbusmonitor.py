@@ -40,7 +40,7 @@ class SmartBMSDbusMonitor:
     def get_smartbmses(self):
         with self._data_lock:
             # Get reference to last list of BMSes
-            smartbmses_copy = self._shared_dbus_smartbmses
+            smartbmses_copy = copy.deepcopy(self._shared_dbus_smartbmses)
         
         # Give back copy of dbus values
         return smartbmses_copy

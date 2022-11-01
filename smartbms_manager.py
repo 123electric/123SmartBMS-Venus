@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
-from smartbmsmonitor import SmartBMSDbusMonitor
+from bmsdbusmonitor import SmartBMSDbusMonitor
 
 # Victron packages
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
@@ -30,15 +30,24 @@ def hysteresis(input, previous_output, threshold_low, threshold_high):
     else:
         return input >= threshold_high
 
+class Constants:
+    float_voltage_lifepo4 = 3.37                    # in volt
+    discharge_max_rating = 1.0                      # in C
+    charge_max_rating = 1.0                         # in C
+    discharge_restart_hysteresis_voltage = 0.15     # in volt
+    discharge_restart_time = 5*60                   # in seconds
+
+class DischargeState:
+    discharge_allowed = 0
+    discharge_limited = 1
+    discharge_blocked = 2
+
 class SmartBMSManagerDbus:
     LAST_SEEN_TIMEOUT = 30
     
     BATTERY_CHARGE_STATE_BULKABSORPTION = 1
     BATTERY_CHARGE_STATE_STORAGE = 2
     BATTERY_CHARGE_STATE_ERROR = 3
-
-    BATTERY_DISCHARGE_MAX_RATING = 1.0
-    BATTERY_CHARGE_MAX_RATING = 1.0
 
     def __init__(self, loop):
         self._loop = loop
@@ -50,6 +59,7 @@ class SmartBMSManagerDbus:
             'version'    : "1.9~1"
         }
 
+        self._smartbms_monitor = SmartBMSDbusMonitor()
         self._device_instance = 287
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
         
@@ -118,10 +128,12 @@ class SmartBMSManagerDbus:
         self._managed_smartbmses = []
 
         self._system_soc = None
-        self._battery_reaching_undervoltage_counter = 0
         self._battery_empty_counter = 0
+        self._discharge_state = DischargeState.discharge_allowed
         self._discharge_voltage_controller_previous_error = 0
         self._discharge_voltage_controller_integral = 0
+        self._discharge_limited_timer = 0
+        self._discharge_restart_timer = 0
         self._charge_voltage_controller_integral = 0
         self._charge_safety_cutoff_active = False
         self.charge_current_limit = 0
@@ -453,71 +465,110 @@ class SmartBMSManagerDbus:
         ############################################
         # Discharge - DCL
         ############################################
-        discharge_limit = discharge_capacity_sum*self.BATTERY_DISCHARGE_MAX_RATING
-        # Basic SoC current limit table to prevent high values when SoC is low
-        # which otherwise could lead to big instant voltage drops when big instant load is applied
-        if soc <= 10:
-            self.max_discharge_current = round(discharge_limit/8, 1)
-        elif 10 < soc <= 20:
-            self.max_discharge_current = round(discharge_limit/4, 1)
-        elif 20 < soc <= 30:
-            self.max_discharge_current = round(discharge_limit/2, 1)
-        elif 30 < soc <= 40:
-            self.max_discharge_current = round(discharge_limit/1.5, 1)
+        discharge_limit = discharge_capacity_sum*Constants.discharge_max_rating
+        discharge_limited_threshold = cell_voltage_min_bms+0.05
+        
+        if self._discharge_state == DischargeState.discharge_allowed:
+            # Basic SoC current limit table to prevent high values when SoC is low
+            # which otherwise could lead to big instant voltage drops when big instant load is applied
+            if soc <= 10:
+                self.max_discharge_current = round(discharge_limit/8, 1)
+            elif 10 < soc <= 20:
+                self.max_discharge_current = round(discharge_limit/4, 1)
+            elif 20 < soc <= 30:
+                self.max_discharge_current = round(discharge_limit/2, 1)
+            elif 30 < soc <= 40:
+                self.max_discharge_current = round(discharge_limit/1.5, 1)
+            else:
+                self.max_discharge_current = round(discharge_limit, 1)
+                
+            if system_lowest_cell_voltage < discharge_limited_threshold:
+                self._discharge_limited_timer += 1
+            else:
+                self._discharge_limited_timer = 0
+
+            if self._discharge_limited_timer >= 3:
+                self._discharge_limited_timer = 0
+                logging.debug('DischargeState.discharge_allowed - low cell voltage, going to state discharge_limited')
+                self._discharge_state = DischargeState.discharge_limited
+        elif self._discharge_state == DischargeState.discharge_limited:
+            # Set discharge current to max 0.05C
+            discharge_rate = min(0.05, Constants.discharge_max_rating)
+            self.max_discharge_current = round(discharge_capacity_sum*discharge_rate, 1)
+
+            # PID loop to keep the lowest cell over Vmin
+            discharge_voltage_controller_kp = 100
+            discharge_voltage_controller_ki = 100
+            discharge_voltage_controller_kd = 0 # Differential currently not implemented
+            discharge_voltage_controller_setpoint = discharge_limited_threshold
+            error = discharge_voltage_controller_setpoint-system_lowest_cell_voltage
+            if system_lowest_cell_voltage < discharge_voltage_controller_setpoint:
+                # Only change PI when battery is being discharged with more than 0.01C
+                if self._get_bmses_sum_current() < self._get_bmses_installed_capacity()*-0.01:
+                    self._discharge_voltage_controller_integral += error
+            else: # Over setpoint
+                self._discharge_voltage_controller_integral += error/20
+            
+            # Very close to Vmin and discharging with quite some current? Try to reduce the charging current to a low value to prevent a Low Voltage Warning
+            # If there is some energy left in the battery, a rising integral will slowly make the discharge current bigger
+            if system_lowest_cell_voltage <= cell_voltage_min_bms + 0.02:
+                self._discharge_voltage_controller_integral = 50/discharge_voltage_controller_ki
+
+            # Limit integral
+            if self._discharge_voltage_controller_integral*discharge_voltage_controller_ki > 100: self._discharge_voltage_controller_integral = 100/discharge_voltage_controller_ki
+            if self._discharge_voltage_controller_integral*discharge_voltage_controller_ki < 0: self._discharge_voltage_controller_integral = 0
+            p = error
+            # Only use proportional when positive
+            p = max(0, p)
+            i = self._discharge_voltage_controller_integral
+            d = error - self._discharge_voltage_controller_previous_error
+            output = discharge_voltage_controller_kp*p + discharge_voltage_controller_ki*i + discharge_voltage_controller_kd*d
+            output = bound(0, output, 100) # In percent limit
+            self._discharge_voltage_controller_previous_error = error
+            self.max_discharge_current *= (100-output*0.95)/100 # Never cut back 100% as this gives 0A, which gives an undervoltage warning
+
+            # Extra safety trying to prevent the BMS to fully cut off the load
+            # When the battery is almost at Vmin for 3 seconds, set discharging current to very low value
+            # Then slowly let the PI algorithm let the DCL rise
+            # If the voltage stays very low, even with very low discharge current, then the battery is really empty
+            # Then set DCL to 0A, which leads to the Multiplus giving an error
+            
+            # Needs to be below BMS Vempty, which is Vmin + 0.1V for a certain time, so the BMS knows the battery is empty and can finish the battery capacity
+            if system_lowest_cell_voltage <= round(cell_voltage_min_bms + 0.05, 2):
+                self._battery_empty_counter += 1
+            else:
+                self._battery_empty_counter = max(0, self._battery_empty_counter-1)
+            
+            if system_lowest_cell_voltage >= cell_voltage_min_bms+0.04 + Constants.discharge_restart_hysteresis_voltage:
+                self._discharge_restart_timer += 1
+            else:
+                self._discharge_restart_timer = max(0, self._discharge_restart_timer-1)
+
+            # Needs to be at least 15 seconds at Vempty, otherwise the BMS does not detect the battery as empty
+            if self._battery_empty_counter >= 15:
+                self._battery_empty_counter = 0
+                logging.debug('DischargeState.discharge_limited - undervoltage, going to state discharge_blocked')
+                self._discharge_state = DischargeState.discharge_blocked
+            elif self._discharge_restart_timer > Constants.discharge_restart_time:
+                self._discharge_restart_timer = 0
+                logging.debug('DischargeState.discharge_limited - voltage restored, going to state discharge_allowed')
+                self._discharge_state = DischargeState.discharge_allowed
+
+        elif self._discharge_state == DischargeState.discharge_blocked:
+            self.max_discharge_current = 0
+
+            if system_lowest_cell_voltage >= cell_voltage_min_bms+0.04 + Constants.discharge_restart_hysteresis_voltage:
+                self._discharge_restart_timer += 1
+            else:
+                self._discharge_restart_timer = max(0, self._discharge_restart_timer-1)
+
+            if self._discharge_restart_timer > Constants.discharge_restart_time:
+                self._discharge_restart_timer = 0
+                logging.debug('DischargeState.discharge_blocked - voltage restored for some time, going to state discharge_allowed')
+                self._discharge_state = DischargeState.discharge_allowed
         else:
-            self.max_discharge_current = round(discharge_limit, 1)
-
-        # Extra safety trying to prevent the BMS to fully cut off the load
-        # When the battery is almost at Vmin for 3 seconds, set discharging current to very low value
-        # Then slowly let the PI algorithm let the DCL rise
-        # If the voltage stays very low, even with very low discharge current, then the battery is really empty
-        # Then set DCL to 0A, which leads to the Multiplus giving an error
-        if system_lowest_cell_voltage - 0.05 <= cell_voltage_min_bms:
-             self._battery_reaching_undervoltage_counter += 1
-        else:
-            self._battery_reaching_undervoltage_counter = 0
-        
-        if system_lowest_cell_voltage - 0.05 <= cell_voltage_min_bms:
-             self._battery_empty_counter += 1
-        else:
-            self._battery_empty_counter = 0
-        
-        if self._battery_empty_counter >= 30: self.max_discharge_current = 0 # Empty, give warning
-        elif self._battery_reaching_undervoltage_counter >= 4: self.max_discharge_current = 0.5 # Very low value, not giving a warning
-
-        
-        # PID loop to keep the lowest cell over Vmin
-        discharge_voltage_controller_kp = 300
-        discharge_voltage_controller_ki = 100
-        discharge_voltage_controller_kd = 0 # Differential currently not implemented
-        discharge_voltage_controller_setpoint = cell_voltage_min_bms+0.10
-
-        error = discharge_voltage_controller_setpoint-system_lowest_cell_voltage
-        if system_lowest_cell_voltage < discharge_voltage_controller_setpoint:
-            # Only change PI when battery is being discharged with more than 0.01C
-            if self._get_bmses_sum_current() < self._get_bmses_installed_capacity()*-0.01:
-                self._discharge_voltage_controller_integral += error
-        else: # Over setpoint
-            self._discharge_voltage_controller_integral += error/20
-        
-        # Very close to Vmin and discharging with quite some current? Try to reduce the charging current to a low value to prevent a Low Voltage Warning
-        # If there is some energy left in the battery, a rising integral will slowly make the discharge current bigger
-        if system_lowest_cell_voltage - 0.06 <= cell_voltage_min_bms:
-            self._discharge_voltage_controller_integral = 100/discharge_voltage_controller_ki
-
-        # Limit integral
-        if self._discharge_voltage_controller_integral*discharge_voltage_controller_ki > 100: self._discharge_voltage_controller_integral = 100/discharge_voltage_controller_ki
-        if self._discharge_voltage_controller_integral*discharge_voltage_controller_ki < 0: self._discharge_voltage_controller_integral = 0
-        p = error
-        # Only use proportional when positive
-        p = max(0, p)
-        i = self._discharge_voltage_controller_integral
-        d = error - self._discharge_voltage_controller_previous_error
-        output = discharge_voltage_controller_kp*p + discharge_voltage_controller_ki*i + discharge_voltage_controller_kd*d
-        output = bound(0, output, 100) # In percent limit
-        self._discharge_voltage_controller_previous_error = error
-        self.max_discharge_current *= (100-output*0.95)/100 # Never cut back 100% as this gives 0A, which gives an undervoltage warning
-        logging.debug('Lowest cell: {:>5.2f}\tError: {:>7.3f}\tMax current: {:>6.1f}\tkp: {:>5.1f}\tki: {:>5.1f}'.format(system_lowest_cell_voltage, error, self.max_discharge_current, discharge_voltage_controller_kp*p, discharge_voltage_controller_ki*i))
+            # Go to default state
+            self._discharge_state = DischargeState.discharge_allowed
 
         ############################################
         # Charge - CVL and CCL
@@ -526,7 +577,7 @@ class SmartBMSManagerDbus:
         if system_highest_cell_voltage >= cell_voltage_max_bms - 0.01: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
             self.max_charge_current = 0
         else:
-            self.max_charge_current = charge_capacity_sum*self.BATTERY_CHARGE_MAX_RATING
+            self.max_charge_current = charge_capacity_sum*Constants.charge_max_rating
         
         highest_cell_voltage_target = round(cell_voltage_full_bms + 0.025, 3)
         # If highest tcell voltage is near Vmax, then lower charging voltage significantly
@@ -568,7 +619,7 @@ class SmartBMSManagerDbus:
             self.max_charge_voltage = min(charge_voltage, voltage_upper_limit)
         else:
             if cell_voltage_full_bms == 3.4 or cell_voltage_full_bms == 3.5 or cell_voltage_full_bms == 3.6: # LiFePO4
-                self.max_charge_voltage = ((3.37 + charge_safety_cutoff_voltage_reduction) * cell_count)
+                self.max_charge_voltage = ((Constants.float_voltage_lifepo4 + charge_safety_cutoff_voltage_reduction) * cell_count)
             else: # Other chemistries
                 self.max_charge_voltage = ((cell_voltage_full_bms - 0.05 + charge_safety_cutoff_voltage_reduction) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
