@@ -1,3 +1,10 @@
+v1.8 - 21-10-2022
+-Added extra conditions when to rebalance, to support generators which stop when the battery is totally full (around Vfull)
+-Better charge algorithm. When recharging, lower CVL extra when near Vmax. Added hysteresis for this.
+
+v1.7 - 3-10-2022
+-Bugfix: quit program when dbus thread gives exception (should not happen but for extra safety)
+
 v1.6 - 16-9-2022
 -Added PI loop for undervoltage protection to keep the lowest cell a little above Vmin
 -Decreased rebalance time from 4 days to 11 hours to be able to recharge

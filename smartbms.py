@@ -19,6 +19,13 @@ import ve_utils
 from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 
+class BatteryChemistry:
+    LIFEPO4 = 0,
+    LTO = 1,
+    NMC = 2,
+    NCA = 3,
+    UNKNOWN = 255
+
 class MAFilter:
     def __init__(
         self,
@@ -95,9 +102,12 @@ class SmartBMSSerial:
         self.nominal_battery_voltage = 0
         self.consumed_ah = 0
         self.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
+        self.battery_chemistry = BatteryChemistry.UNKNOWN
+
         self._battery_full_counter = 0
         self._balanced_timer = 0
         self._unbalance_detection_timer = 0
+        self._partially_discharged_timer = 0
         
         self._comm_error_shadow = False
         self._current_filter = deque()
@@ -113,12 +123,22 @@ class SmartBMSSerial:
             return True
         else:
             return False
+
+    def determine_chemistry(self):
+        if self.cell_voltage_full >= 3.4 and self.cell_voltage_full <= 3.7: return BatteryChemistry.LIFEPO4
+        elif self.cell_voltage_min >= 3.425 and self.cell_voltage_full >= 3.8 and self.cell_voltage_full <= 4.4: return BatteryChemistry.NMC
+        elif self.cell_voltage_full >= 3.8 and self.cell_voltage_full <= 4.4: return BatteryChemistry.NCA
+        elif self.cell_voltage_min >= 3.425: return BatteryChemistry.NMC
+        elif self.cell_voltage_min >= 3.2: return BatteryChemistry.NCA
+        elif self.cell_voltage_full >= 2.5 and self.cell_voltage_full <= 2.8: return BatteryChemistry.LTO
+        else: return BatteryChemistry.UNKNOWN
     
-    def determine_nominal_cell_voltage(self):
-        if self.cell_voltage_full >= 3.4 and self.cell_voltage_full <= 3.6: return 3.3
-        if self.cell_voltage_full >= 3.9 and self.cell_voltage_full <= 4.4: return 3.7
-        if self.cell_voltage_full >= 2.5 and self.cell_voltage_full <= 2.7: return 2.3
-        return 0
+    def determine_nominal_cell_voltage(self, chemistry):
+        if chemistry == BatteryChemistry.LIFEPO4: return 3.4
+        if chemistry == BatteryChemistry.NMC: return 3.7
+        if chemistry == BatteryChemistry.NCA: return 3.7
+        if chemistry == BatteryChemistry.LTO: return 2.3
+        return 3.3 # Failsafe, most customers have LiFePO4
     
     # Must be called every second
     def update(self):
@@ -128,6 +148,7 @@ class SmartBMSSerial:
             self.loop.quit()
             return
 
+        self.battery_chemistry = self.determine_chemistry()
         self._calculate_consumed_ah()
         self._update_time_to_go()
         self._battery_charge_state()
@@ -192,7 +213,7 @@ class SmartBMSSerial:
                             self.cell_count = buffer[25]
                             self.energy_stored_wh = self._decode_value(buffer[34:37], 1)
                             self.capacity = round(self._decode_value(buffer[49:51], 0.1), 1) # in kWh
-                            self.nominal_battery_voltage = self.determine_nominal_cell_voltage()*self.cell_count
+                            self.nominal_battery_voltage = self.determine_nominal_cell_voltage(self.battery_chemistry)*self.cell_count
                             if self.nominal_battery_voltage != 0:
                                 self.capacity_ah = self.capacity*1000/self.nominal_battery_voltage
                                 self.energy_stored_ah = self.energy_stored_wh/self.nominal_battery_voltage
@@ -282,22 +303,37 @@ class SmartBMSSerial:
             if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.04: # Battery is full if all cells are >= Vbalance and tail current <= 4%
                 self._battery_full_counter += 1
             else:
-                self._battery_full_counter = 0
-            if self._battery_full_counter >= 30 and self.soc == 100: # When BMS also sees the pack as full
+                 # Lower instead of set to zero, so a single time value of a little under will not endlessly keep the counter go to 0
+                self._battery_full_counter = max(self._battery_full_counter-1, 0)
+            # Battery_full_counter should really be 120 seconds at least so other systems like generators have time to see the battery as full, too
+            if self._battery_full_counter >= 120 and self.soc == 100: # When BMS also sees the pack as full
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_STORAGE
         elif self.battery_charge_state == self.BATTERY_CHARGE_STATE_STORAGE:
             # Battery idle and unbalance of more than 40mV
-            if self.capacity_ah*-0.05 < battery_current < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.04:
+            if self.capacity_ah*-0.05 < battery_current < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.05:
                 self._unbalance_detection_timer += 1
             else:
                 self._unbalance_detection_timer = 0
+
+            # If battery is partially discharged, also reset to rebalance. Needed for generator systems as they start at this voltage and stop around 3.5V
+            if self.battery_chemistry == BatteryChemistry.LIFEPO4 and self.lowest_cell_voltage < 3.25:
+                self._partially_discharged_timer += 1
+            else:
+                self._partially_discharged_timer = 0
             
             # At least balance once a week
             self._balanced_timer += 1
 
-            # At least 60 seconds in a row a voltage difference of at least 40mV? Unbalance detected
-            if self._unbalance_detection_timer > 5*60 or self._balanced_timer >= 1*11*60*60: # Also restart after 11 hours, because it is probably a new day
+            # Partially discharged based on SoC? Reset to rebalance
+            # Partially discharged based on voltage? Reset to rebalance
+            # Unbalance detected bacause at least 5 minutes in a row a voltage difference of at least 40mV? Unbalance detected. Reset to rebalance
+            # Also restart after 11 hours, because it is probably a new day
+            if self.soc < 70 \
+                or self._partially_discharged_timer > 9 \
+                or self._unbalance_detection_timer > 10*60 \
+                or self._balanced_timer >= 1*11*60*60:
                 self._unbalance_detection_timer = 0
+                self._partially_discharged_timer = 0
                 self._balanced_timer = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_BULKABSORPTION
         else:
@@ -313,7 +349,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.7~1"
+            'version'    : "1.9~1"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]

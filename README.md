@@ -1,6 +1,6 @@
-# smartbms-venus
+# 123\SmartBMS Venus software
 
-123\SmartBMS driver for Victron VenusOS.
+This software creates deep integration of the 123\SmartBMS with any Victron GX device. The software runs on the Victron GX OS, which is VenusOS.
 
 ## Victron Cerbo/Venus
 
