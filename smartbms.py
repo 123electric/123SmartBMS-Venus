@@ -303,7 +303,7 @@ class SmartBMSSerial:
             if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.04: # Battery is full if all cells are >= Vbalance and tail current <= 4%
                 self._battery_full_counter += 1
             else:
-                 # Lower instead of set to zero, so a single time value of a little under will not endlessly keep the counter go to 0
+                # Lower instead of set to zero, so a single time value of a little under will not endlessly keep the counter go to 0
                 self._battery_full_counter = max(self._battery_full_counter-1, 0)
             # Battery_full_counter should really be 120 seconds at least so other systems like generators have time to see the battery as full, too
             if self._battery_full_counter >= 120 and self.soc == 100: # When BMS also sees the pack as full
@@ -349,7 +349,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.9~1"
+            'version'    : "1.9~2"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]

@@ -8,10 +8,10 @@ import sys
 import threading
 import time
 import logging
+from collections import deque
 from datetime import datetime
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
-from bmsdbusmonitor import SmartBMSDbusMonitor
 
 # Victron packages
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
@@ -49,6 +49,9 @@ class SmartBMSManagerDbus:
     BATTERY_CHARGE_STATE_STORAGE = 2
     BATTERY_CHARGE_STATE_ERROR = 3
 
+    BATTERY_DISCHARGE_MAX_RATING = 1.0
+    BATTERY_CHARGE_MAX_RATING = 1.0
+
     def __init__(self, loop):
         self._loop = loop
 
@@ -56,11 +59,10 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.9~1"
+            'version'    : "1.9~2"
         }
-
-        self._smartbms_monitor = SmartBMSDbusMonitor()
         self._device_instance = 287
+
         self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
         
         # Create the management objects, as specified in the ccgx dbus-api document
@@ -130,10 +132,10 @@ class SmartBMSManagerDbus:
         self._system_soc = None
         self._battery_empty_counter = 0
         self._discharge_state = DischargeState.discharge_allowed
-        self._discharge_voltage_controller_previous_error = 0
-        self._discharge_voltage_controller_integral = 0
         self._discharge_limited_timer = 0
         self._discharge_restart_timer = 0
+        self._discharge_voltage_controller_previous_error = 0
+        self._discharge_voltage_controller_integral = 0
         self._charge_voltage_controller_integral = 0
         self._charge_safety_cutoff_active = False
         self.charge_current_limit = 0
@@ -143,109 +145,234 @@ class SmartBMSManagerDbus:
 
         # Setup timers
         self.timer_1000ms = 0
+
+        # Lock for shared data
+        self._data_lock = threading.Lock()
+        self._monitor_thread = threading.Thread(target=lambda:self._monitor())
+        self._monitor_thread.daemon = True
+        self._monitor_thread.start()
+    
+    def _monitor(self):
+        try:
+            dummy = {'code': None, 'whenToLog': 'configChange', 'accessLevel': None}
+            dbus_tree = {
+                'com.victronenergy.battery': {
+                    '/Connected': dummy,
+                    '/ProductName': dummy,
+                    '/Mgmt/Connection': dummy,
+                    '/DeviceInstance': dummy,
+                    '/Dc/0/Voltage': dummy,
+                    '/Dc/0/Current': dummy,
+                    '/Dc/0/Power': dummy,
+                    '/Soc': dummy,
+                    '/TimeToGo': dummy,
+                    '/ConsumedAmphours': dummy,
+                    '/Capacity': dummy,
+                    '/CustomName': dummy,
+                    '/InstalledCapacity': dummy,
+                    '/ProductId': dummy,
+                    '/UpdateTimestamp': dummy,
+                    '/System/MinCellVoltage': dummy,
+                    '/System/MinVoltageCellId': dummy,
+                    '/System/MaxCellVoltage': dummy,
+                    '/System/MaxVoltageCellId': dummy,
+                    '/System/MinCellTemperature': dummy,
+                    '/System/MinTemperatureCellId': dummy,
+                    '/System/MaxCellTemperature': dummy,
+                    '/System/MaxTemperatureCellId': dummy,
+                    '/System/NrOfModulesBlockingCharge': dummy,
+                    '/System/NrOfModulesBlockingDischarge': dummy,
+                    '/System/BatteryChargeState': dummy,
+                    '/System/LowVoltageThreshold': dummy,
+                    '/System/HighVoltageThreshold': dummy,
+                    '/System/FullVoltageThreshold': dummy,
+                    '/System/NrOfCells': dummy,
+                    '/Io/AllowToCharge': dummy,
+                    '/Io/AllowToDischarge': dummy},
+                'com.victronenergy.system': {
+                    '/Connected': dummy,
+                    '/ProductName': dummy,
+                    '/Mgmt/Connection': dummy,
+                    '/DeviceInstance': dummy,
+                    '/Dc/Battery/Soc': dummy
+                    }
+            }
+
+            self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
+                deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
+
+            while(1):
+                # Lock data before reading/writing because this is a separate thread
+                with self._data_lock:
+                    self._scan_connected_smartbmses()
+                    self._remove_disconnected_bmses()
+                    self._determine_managed_smartbmses()
+                    self._system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
+                time.sleep(0.2)
+            
+        except Exception as e:
+            logging.critical('Fatal exception: ')
+            logging.critical(e)
+            self._loop.quit()
+
+    def _get_connected_service_list(self, classfilter=None):
+        services = self._dbusmonitor.get_service_list(classfilter=classfilter)
+        return services
+    
+    def _scan_connected_smartbmses(self):
+        batteries = self._get_connected_service_list('com.victronenergy.battery').items()
+        for battery in batteries:
+            product_name = self._dbusmonitor.get_value(battery[0], '/ProductName')
+            connected = self._dbusmonitor.get_value(battery[0], '/Connected')
+            updated_timestamp = self._dbusmonitor.get_value(battery[0], '/UpdateTimestamp')
+            if product_name == '123SmartBMS' and connected == 1 and updated_timestamp != None:
+                service = battery[0]
+                device_instance = battery[1]
+                matching_bms = list(filter(lambda b: b.service == service, self._connected_smartbmses))
+                in_list = len(matching_bms)
+                if in_list == 0:
+                    # New: create new instance
+                    found_bms = SmartBMSDbus(service, device_instance)
+                    self._connected_smartbmses.append(found_bms)
+                    self._update_bms_data(found_bms)
+                    logging.info('New BMS found on {} - adding to BMS list. Connected BMSes count: {}'.format(found_bms.service, len(self._connected_smartbmses)))
+                else:
+                    self._update_bms_data(matching_bms[0])
+    
+    
+    def _update_bms_data(self, bms):
+        bms.last_seen = time.time()
+        bms.lowest_voltage = self._dbusmonitor.get_value(bms.service, '/System/MinCellVoltage')
+        bms.lowest_voltage_num = self._dbusmonitor.get_value(bms.service, '/System/MinVoltageCellId')
+        bms.highest_voltage = self._dbusmonitor.get_value(bms.service, '/System/MaxCellVoltage')
+        bms.highest_voltage_num = self._dbusmonitor.get_value(bms.service, '/System/MaxVoltageCellId')
+        bms.lowest_temperature = self._dbusmonitor.get_value(bms.service, '/System/MinCellTemperature')
+        bms.lowest_temperature_num = self._dbusmonitor.get_value(bms.service, '/System/MinTemperatureCellId')
+        bms.highest_temperature = self._dbusmonitor.get_value(bms.service, '/System/MaxCellTemperature')
+        bms.highest_temperature_num = self._dbusmonitor.get_value(bms.service, '/System/MaxTemperatureCellId')
+        bms.stored_ah = self._dbusmonitor.get_value(bms.service, '/Capacity')
+        bms.installed_capacity = self._dbusmonitor.get_value(bms.service, '/InstalledCapacity')
+        bms.battery_charge_state = self._dbusmonitor.get_value(bms.service, '/System/BatteryChargeState')
+        bms.allowed_to_charge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingCharge') == 0
+        bms.allowed_to_discharge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingDischarge') == 0
+        bms.soc = self._dbusmonitor.get_value(bms.service, '/Soc')
+        bms.voltage = self._dbusmonitor.get_value(bms.service, '/Dc/0/Voltage')
+        bms.current = self._dbusmonitor.get_value(bms.service, '/Dc/0/Current')
+        bms.power = self._dbusmonitor.get_value(bms.service, '/Dc/0/Power')
+        bms.cell_voltage_min = self._dbusmonitor.get_value(bms.service, '/System/LowVoltageThreshold')
+        bms.cell_voltage_max = self._dbusmonitor.get_value(bms.service, '/System/HighVoltageThreshold')
+        bms.cell_voltage_full = self._dbusmonitor.get_value(bms.service, '/System/FullVoltageThreshold')
+        bms.cell_count = self._dbusmonitor.get_value(bms.service, '/System/NrOfCells')
+        bms.time_to_go = self._dbusmonitor.get_value(bms.service, '/TimeToGo')
+        bms.custom_name = self._dbusmonitor.get_value(bms.service, '/CustomName')
+        bms.communication_error = True if bms.soc == None else False
+
+    def _handleservicechange(self):
+        self._changed = True
+
+    def _dbus_value_changed(self, dbusServiceName, dbusPath, dict, changes, deviceInstance):
+        self._changed = True
+
+        # Workaround because com.victronenergy.vebus is available even when there is no vebus product
+        # connected.
+        if (dbusPath in ['/Connected', '/ProductName', '/Mgmt/Connection'] or
+            (dbusPath == '/State' and dbusServiceName.split('.')[0:3] == ['com', 'victronenergy', 'vebus'])):
+            self._handleservicechange()
+
+    def _device_added(self, service, instance, do_service_change=True):
+        if do_service_change:
+            self._handleservicechange()
+
+    def _device_removed(self, service, instance):
+        self._handleservicechange()
     
     def update(self):
-        self._update_data_from_dbus()
-        self._determine_managed_smartbmses()
-        self._remove_disconnected_bmses()
-        bms_having_lowest_voltage = self._get_bmses_having_lowest_voltage()
-        bms_having_highest_voltage = self._get_bmses_having_highest_voltage()
-        bms_having_lowest_temperature = self._get_bmses_having_lowest_temperature()
-        bms_having_highest_temperature = self._get_bmses_having_highest_temperature()
+        # Lock data before reading/writing
+        with self._data_lock:
+            bms_having_lowest_voltage = self._get_bmses_having_lowest_voltage()
+            bms_having_highest_voltage = self._get_bmses_having_highest_voltage()
+            bms_having_lowest_temperature = self._get_bmses_having_lowest_temperature()
+            bms_having_highest_temperature = self._get_bmses_having_highest_temperature()
 
-        if len(self._managed_smartbmses) == 0 \
-        or bms_having_lowest_voltage == None \
-        or bms_having_highest_voltage == None \
-        or bms_having_lowest_temperature == None \
-        or bms_having_highest_temperature == None:
-            self._dbusservice["/Soc"] = None
-            #self._dbusservice["/SystemSwitch"] = None
-            self._dbusservice["/ConsumedAmphours"] = None
-            self._dbusservice["/Capacity"] = None
-            self._dbusservice["/InstalledCapacity"] = None
-            self._dbusservice["/TimeToGo"] = None
-            self._dbusservice["/Dc/0/Voltage"] = None
-            self._dbusservice["/Dc/0/Current"] = None
-            self._dbusservice["/Dc/0/Power"] = None
-            self._dbusservice["/Dc/0/Temperature"] = None
-            #self._dbusservice["/Io/AllowToCharge"] = None
-            #self._dbusservice["/Io/AllowToDischarge"] = None
-            self._dbusservice["/System/MinCellVoltage"] = None
-            self._dbusservice["/System/MinVoltageCellId"] = None
-            self._dbusservice["/System/MaxCellVoltage"] = None
-            self._dbusservice["/System/MaxVoltageCellId"] = None
-            self._dbusservice["/System/MinCellTemperature"] = None
-            self._dbusservice["/System/MinTemperatureCellId"] = None
-            self._dbusservice["/System/MaxCellTemperature"] = None
-            self._dbusservice["/System/MaxTemperatureCellId"] = None
-            self._dbusservice["/System/NrOfModulesOnline"] = 0
-            self._dbusservice["/System/NrOfModulesOffline"] = 1
-            self._dbusservice["/System/NrOfModulesBlockingCharge"] = None
-            self._dbusservice["/System/NrOfModulesBlockingDischarge"] = None
-            #self._dbusservice["/Alarms/LowVoltage"] = None
-            #self._dbusservice["/Alarms/HighVoltage"] = None
-            #self._dbusservice["/Alarms/LowTemperature"] = None
-            #self._dbusservice["/Alarms/HighTemperature"] = None
-        else:
-            stored_ah = self._get_bmses_stored_ah()
-            installed_capacity = self._get_bmses_installed_capacity()
-            self._dbusservice["/Soc"] = self._get_bmses_soc()
-            #self._dbusservice["/SystemSwitch"] = 1
-            self._dbusservice["/ConsumedAmphours"] = round(-1*(installed_capacity-stored_ah),1)+0 # Add zero to remove negative sigh from -0.0
-            self._dbusservice["/Capacity"] = self._get_bmses_stored_ah()
-            self._dbusservice["/InstalledCapacity"] = self._get_bmses_installed_capacity()
-            self._dbusservice["/TimeToGo"] = self._get_bmses_average_time_to_go()
-            self._dbusservice["/Dc/0/Voltage"] = self._get_bmses_average_voltage()
-            self._dbusservice["/Dc/0/Current"] = self._get_bmses_sum_current()
-            self._dbusservice["/Dc/0/Power"] = self._get_bmses_sum_power()
-            self._dbusservice["/Dc/0/Temperature"] = bms_having_highest_temperature.highest_temperature
-            #self._dbusservice["/Io/AllowToCharge"] = int(self.allowed_to_charge)
-            #self._dbusservice["/Io/AllowToDischarge"] = int(self.allowed_to_discharge)
-            self._dbusservice["/System/MinCellVoltage"] = bms_having_lowest_voltage.lowest_voltage
-            self._dbusservice["/System/MinVoltageCellId"] = '[' + bms_having_lowest_voltage.custom_name[:12] + '] ' + str(bms_having_lowest_voltage.lowest_voltage_num)
-            self._dbusservice["/System/MaxCellVoltage"] = bms_having_highest_voltage.highest_voltage
-            self._dbusservice["/System/MaxVoltageCellId"] =  '[' + bms_having_highest_voltage.custom_name[:12] + '] ' + str(bms_having_highest_voltage.highest_voltage_num)
-            self._dbusservice["/System/MinCellTemperature"] = bms_having_lowest_temperature.lowest_temperature
-            self._dbusservice["/System/MinTemperatureCellId"] = '[' + bms_having_lowest_temperature.custom_name[:12] + '] ' + str(bms_having_lowest_temperature.lowest_temperature_num)
-            self._dbusservice["/System/MaxCellTemperature"] = bms_having_highest_temperature.highest_temperature
-            self._dbusservice["/System/MaxTemperatureCellId"] = '[' + bms_having_highest_temperature.custom_name[:12] + '] ' + str(bms_having_lowest_temperature.highest_temperature_num)
-            self._dbusservice["/System/NrOfModulesOnline"] = len(self._managed_smartbmses)
-            self._dbusservice["/System/NrOfModulesOffline"] = 0
-            self._dbusservice["/System/NrOfModulesBlockingCharge"] = self._get_bmses_nr_of_banks_blocking_charge()
-            self._dbusservice["/System/NrOfModulesBlockingDischarge"] = self._get_bmses_nr_of_banks_blocking_discharge()
-            #self._dbusservice["/Alarms/LowVoltage"] = 0
-            #self._dbusservice["/Alarms/HighVoltage"] = 0
-            #self._dbusservice["/Alarms/LowTemperature"] = int(self.alarm_minimum_temperature)
-            #self._dbusservice["/Alarms/HighTemperature"] = int(self.alarm_maximum_temperature)
-
-        cell_voltage_min = self._get_bmses_cell_voltage_min()
-        cell_count = self._get_bmses_cell_count()
-        if cell_voltage_min != None and cell_count != None:
-            self._dbusservice["/Info/BatteryLowVoltage"] = (cell_voltage_min+0.05) * cell_count
-        else:
-            self._dbusservice["/Info/BatteryLowVoltage"] = None
-
-        self.timer_1000ms = 0 if self.timer_1000ms == 4 else self.timer_1000ms+1
-        # Make sure updating only happens once a second
-        if self.timer_1000ms == 0:
-            self._calculate_current_limits()
-            self._dbusservice["/Info/MaxChargeVoltage"] = self.max_charge_voltage
-            self._dbusservice["/Info/MaxChargeCurrent"] = self.max_charge_current
-            self._dbusservice["/Info/MaxDischargeCurrent"] = self.max_discharge_current
-
-    def _update_data_from_dbus(self):
-        self._system_soc = self._smartbms_monitor.get_system_soc()
-        dbus_smartbmses = self._smartbms_monitor.get_smartbmses()
-        for bms in dbus_smartbmses:
-            matching_bms = list(filter(lambda b: b.service == bms.service, self._connected_smartbmses))
-            in_list = len(matching_bms)
-            if in_list == 0:
-                self._connected_smartbmses.append(bms)
-                logging.info('New BMS found on {} - adding to BMS list. Connected BMSes count: {}'.format(bms.service, len(self._connected_smartbmses)))
+            if len(self._managed_smartbmses) == 0 \
+            or bms_having_lowest_voltage == None \
+            or bms_having_highest_voltage == None \
+            or bms_having_lowest_temperature == None \
+            or bms_having_highest_temperature == None:
+                self._dbusservice["/Soc"] = None
+                #self._dbusservice["/SystemSwitch"] = None
+                self._dbusservice["/ConsumedAmphours"] = None
+                self._dbusservice["/Capacity"] = None
+                self._dbusservice["/InstalledCapacity"] = None
+                self._dbusservice["/TimeToGo"] = None
+                self._dbusservice["/Dc/0/Voltage"] = None
+                self._dbusservice["/Dc/0/Current"] = None
+                self._dbusservice["/Dc/0/Power"] = None
+                self._dbusservice["/Dc/0/Temperature"] = None
+                #self._dbusservice["/Io/AllowToCharge"] = None
+                #self._dbusservice["/Io/AllowToDischarge"] = None
+                self._dbusservice["/System/MinCellVoltage"] = None
+                self._dbusservice["/System/MinVoltageCellId"] = None
+                self._dbusservice["/System/MaxCellVoltage"] = None
+                self._dbusservice["/System/MaxVoltageCellId"] = None
+                self._dbusservice["/System/MinCellTemperature"] = None
+                self._dbusservice["/System/MinTemperatureCellId"] = None
+                self._dbusservice["/System/MaxCellTemperature"] = None
+                self._dbusservice["/System/MaxTemperatureCellId"] = None
+                self._dbusservice["/System/NrOfModulesOnline"] = 0
+                self._dbusservice["/System/NrOfModulesOffline"] = 1
+                self._dbusservice["/System/NrOfModulesBlockingCharge"] = None
+                self._dbusservice["/System/NrOfModulesBlockingDischarge"] = None
+                #self._dbusservice["/Alarms/LowVoltage"] = None
+                #self._dbusservice["/Alarms/HighVoltage"] = None
+                #self._dbusservice["/Alarms/LowTemperature"] = None
+                #self._dbusservice["/Alarms/HighTemperature"] = None
             else:
-                # Replace with new values
-                self._connected_smartbmses.remove(matching_bms[0])
-                self._connected_smartbmses.append(bms)
+                stored_ah = self._get_bmses_stored_ah()
+                installed_capacity = self._get_bmses_installed_capacity()
+                self._dbusservice["/Soc"] = self._get_bmses_soc()
+                #self._dbusservice["/SystemSwitch"] = 1
+                self._dbusservice["/ConsumedAmphours"] = round(-1*(installed_capacity-stored_ah),1)+0 # Add zero to remove negative sigh from -0.0
+                self._dbusservice["/Capacity"] = self._get_bmses_stored_ah()
+                self._dbusservice["/InstalledCapacity"] = self._get_bmses_installed_capacity()
+                self._dbusservice["/TimeToGo"] = self._get_bmses_average_time_to_go()
+                self._dbusservice["/Dc/0/Voltage"] = self._get_bmses_average_voltage()
+                self._dbusservice["/Dc/0/Current"] = self._get_bmses_sum_current()
+                self._dbusservice["/Dc/0/Power"] = self._get_bmses_sum_power()
+                self._dbusservice["/Dc/0/Temperature"] = bms_having_highest_temperature.highest_temperature
+                #self._dbusservice["/Io/AllowToCharge"] = int(self.allowed_to_charge)
+                #self._dbusservice["/Io/AllowToDischarge"] = int(self.allowed_to_discharge)
+                self._dbusservice["/System/MinCellVoltage"] = bms_having_lowest_voltage.lowest_voltage
+                self._dbusservice["/System/MinVoltageCellId"] = '[' + bms_having_lowest_voltage.custom_name[:12] + '] ' + str(bms_having_lowest_voltage.lowest_voltage_num)
+                self._dbusservice["/System/MaxCellVoltage"] = bms_having_highest_voltage.highest_voltage
+                self._dbusservice["/System/MaxVoltageCellId"] =  '[' + bms_having_highest_voltage.custom_name[:12] + '] ' + str(bms_having_highest_voltage.highest_voltage_num)
+                self._dbusservice["/System/MinCellTemperature"] = bms_having_lowest_temperature.lowest_temperature
+                self._dbusservice["/System/MinTemperatureCellId"] = '[' + bms_having_lowest_temperature.custom_name[:12] + '] ' + str(bms_having_lowest_temperature.lowest_temperature_num)
+                self._dbusservice["/System/MaxCellTemperature"] = bms_having_highest_temperature.highest_temperature
+                self._dbusservice["/System/MaxTemperatureCellId"] = '[' + bms_having_highest_temperature.custom_name[:12] + '] ' + str(bms_having_lowest_temperature.highest_temperature_num)
+                self._dbusservice["/System/NrOfModulesOnline"] = len(self._managed_smartbmses)
+                self._dbusservice["/System/NrOfModulesOffline"] = 0
+                self._dbusservice["/System/NrOfModulesBlockingCharge"] = self._get_bmses_nr_of_banks_blocking_charge()
+                self._dbusservice["/System/NrOfModulesBlockingDischarge"] = self._get_bmses_nr_of_banks_blocking_discharge()
+                #self._dbusservice["/Alarms/LowVoltage"] = 0
+                #self._dbusservice["/Alarms/HighVoltage"] = 0
+                #self._dbusservice["/Alarms/LowTemperature"] = int(self.alarm_minimum_temperature)
+                #self._dbusservice["/Alarms/HighTemperature"] = int(self.alarm_maximum_temperature)
+
+            cell_voltage_min = self._get_bmses_cell_voltage_min()
+            cell_count = self._get_bmses_cell_count()
+            if cell_voltage_min != None and cell_count != None:
+                self._dbusservice["/Info/BatteryLowVoltage"] = (cell_voltage_min+0.05) * cell_count
+            else:
+                self._dbusservice["/Info/BatteryLowVoltage"] = None
+
+            self.timer_1000ms = 0 if self.timer_1000ms == 4 else self.timer_1000ms+1
+            # Make sure updating only happens once a second
+            if self.timer_1000ms == 0:
+                self._calculate_current_limits()
+                self._dbusservice["/Info/MaxChargeVoltage"] = self.max_charge_voltage
+                self._dbusservice["/Info/MaxChargeCurrent"] = self.max_charge_current
+                self._dbusservice["/Info/MaxDischargeCurrent"] = self.max_discharge_current
 
     def _remove_disconnected_bmses(self):
         for bms in self._connected_smartbmses:
@@ -623,6 +750,36 @@ class SmartBMSManagerDbus:
             else: # Other chemistries
                 self.max_charge_voltage = ((cell_voltage_full_bms - 0.05 + charge_safety_cutoff_voltage_reduction) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
+
+class SmartBMSDbus(object):
+    def __init__(self, service, device_instance):
+        self.service = service
+        self.device_instance = device_instance
+        self.last_seen = time.time()
+        self.lowest_voltage = None
+        self.lowest_voltage_num = None
+        self.highest_voltage = None
+        self.highest_voltage_num = None
+        self.lowest_temperature = None
+        self.lowest_temperature_num = None
+        self.highest_temperature = None
+        self.highest_temperature_num = None
+        self.stored_ah = None
+        self.installed_capacity = None
+        self.soc = None
+        self.voltage = None
+        self.current = None
+        self.power = None
+        self.cell_voltage_min = None
+        self.cell_voltage_max = None
+        self.cell_voltage_full = None
+        self.cell_count = None
+        self.time_to_go = None
+        self.custom_name = None
+        self.battery_charge_state = None
+        self.allowed_to_charge = False
+        self.allowed_to_discharge = False
+        self.communication_error = False
 
 # Called on a one second timer
 def handle_timer_tick():
