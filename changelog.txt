@@ -1,3 +1,8 @@
+v1.9 - 4-11-2022
+-Decreased balancing time by better detection of when battery is full and balanced
+-Better discharge algorithm. When almost empty, keep DCL at 0A until voltage is 100mV higher and after some time
+-Increased imbalance detection from 40mV to 50mV and from 10 to 20 minutes
+
 v1.8 - 21-10-2022
 -Added extra conditions when to rebalance, to support generators which stop when the battery is totally full (around Vfull)
 -Better charge algorithm. When recharging, lower CVL extra when near Vmax. Added hysteresis for this.

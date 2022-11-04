@@ -34,7 +34,7 @@ class Constants:
     float_voltage_lifepo4 = 3.37                    # in volt
     discharge_max_rating = 1.0                      # in C
     charge_max_rating = 1.0                         # in C
-    discharge_restart_hysteresis_voltage = 0.15     # in volt
+    discharge_restart_hysteresis_voltage = 0.1      # in volt
     discharge_restart_time = 5*60                   # in seconds
 
 class DischargeState:
@@ -59,7 +59,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.9~2"
+            'version'    : "1.9"
         }
         self._device_instance = 287
 
