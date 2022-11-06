@@ -142,7 +142,7 @@ class SmartBMS:
     def _calculate_current_limits(self):
         if self.alarm_cell_communication or self.alarm_serial_communication:
             max_discharge_current = 0
-            max_charge_current = 0
+            max_charge_current = 0.8
             return
         
         # Discharge - very simple algorithm, may need control loop for better results
@@ -159,9 +159,9 @@ class SmartBMS:
         # Charge
         # Fixed charge current - when pack is full, regulate the voltage
         if not self.allowed_to_charge:
-            self.max_charge_current = 0
-        elif self.highest_cell_voltage+0.05 >= self.cell_voltage_max: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
-            self.max_charge_current = 0
+            self.max_charge_current = 0.8
+        elif self.highest_cell_voltage+0.03 >= self.cell_voltage_max: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
+            self.max_charge_current = 0.5
         else:
             self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING
         
