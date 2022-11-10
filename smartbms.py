@@ -343,7 +343,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : "1.2~3"
+            'version'    : "1.2~4"
         }
         
         device_port = args.device[dev.rfind('/') + 1:]
@@ -445,9 +445,9 @@ class SmartBMSDbus():
             self._dbusservice["/Alarms/LowTemperature"] = None
             self._dbusservice["/Alarms/HighTemperature"] = None
             self._dbusservice["/Info/BatteryLowVoltage"] = None
-            self._dbusservice["/Info/MaxChargeVoltage"] = None
-            self._dbusservice["/Info/MaxChargeCurrent"] = 0
-            self._dbusservice["/Info/MaxDischargeCurrent"] = 0
+            self._dbusservice["/Info/MaxChargeVoltage"] = 27.2
+            self._dbusservice["/Info/MaxChargeCurrent"] = self._bms.max_charge_current
+            self._dbusservice["/Info/MaxDischargeCurrent"] = self._bms.max_discharge_current
         else:
             self._dbusservice["/Soc"] = self._bms.soc
             self._dbusservice["/SystemSwitch"] = 1
