@@ -141,8 +141,8 @@ class SmartBMS:
     
     def _calculate_current_limits(self):
         if self.alarm_cell_communication or self.alarm_serial_communication:
-            max_discharge_current = 0
-            max_charge_current = 0.8
+            self.max_discharge_current = 0
+            self.max_charge_current = 1.0
             return
         
         # Discharge - very simple algorithm, may need control loop for better results
@@ -158,7 +158,7 @@ class SmartBMS:
         
         # Charge
         if self.alarm_serial_communication or self.alarm_cell_communication: # No communication? Charge very slowly
-            self.max_charge_current = 0.8
+            self.max_charge_current = 1.0
         elif self.highest_cell_voltage <= self.cell_voltage_max - 0.03:
             if not self.allowed_to_charge:
                 if self.lowest_cell_temperature > -10 and self.highest_cell_temperature < 50:
@@ -343,7 +343,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : "1.2~4"
+            'version'    : "1.2~5"
         }
         
         device_port = args.device[dev.rfind('/') + 1:]
