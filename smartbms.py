@@ -307,6 +307,7 @@ class SmartBMSSerial:
                 self._battery_full_counter = max(self._battery_full_counter-1, 0)
             # Battery_full_counter should really be 120 seconds at least so other systems like generators have time to see the battery as full, too
             if self._battery_full_counter >= 120 and self.soc == 100: # When BMS also sees the pack as full
+                self._battery_full_counter = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_STORAGE
         elif self.battery_charge_state == self.BATTERY_CHARGE_STATE_STORAGE:
             # Battery idle and unbalance of more than 40mV
