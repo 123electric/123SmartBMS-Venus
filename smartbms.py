@@ -148,7 +148,7 @@ class SmartBMS:
         # Discharge - very simple algorithm, may need control loop for better results
         discharge_limit = self.capacity_ah*self.BATTERY_DISCHARGE_MAX_RATING
         if not self.allowed_to_discharge:
-            self.max_discharge_current = self.capacity_ah*self.BATTERY_DISCHARGE_MAX_RATING/20
+            self.max_discharge_current = 0.1
         elif self.lowest_cell_voltage - 0.05 <= self.cell_voltage_min:
             self.max_discharge_current = 0
         elif self.soc <= 30:
