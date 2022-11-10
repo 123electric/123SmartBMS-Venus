@@ -157,13 +157,18 @@ class SmartBMS:
             self.max_discharge_current = round(discharge_limit, 1)
         
         # Charge
-        # Fixed charge current - when pack is full, regulate the voltage
-        if not self.allowed_to_charge:
+        if self.alarm_serial_communication or self.alarm_cell_communication: # No communication? Charge very slowly
             self.max_charge_current = 0.8
-        elif self.highest_cell_voltage+0.03 >= self.cell_voltage_max: # Pre-critical cutoff: should never happen. Avoid BMS triggering power cutoff
-            self.max_charge_current = 0.5
+        elif self.highest_cell_voltage <= self.cell_voltage_max - 0.03:
+            if not self.allowed_to_charge:
+                if self.lowest_cell_temperature > -10 and self.highest_cell_temperature < 50:
+                    self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING/5
+                else:
+                    self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING/20
+            else:
+                self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING
         else:
-            self.max_charge_current = self.capacity_ah*self.BATTERY_CHARGE_MAX_RATING
+            self.max_charge_current = 0.5
         
         #print('')
         if self._balance_state == self.BALANCE_STATE_UNBALANCED:
@@ -338,7 +343,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : 1.02
+            'version'    : "1.2~3"
         }
         
         device_port = args.device[dev.rfind('/') + 1:]
@@ -354,7 +359,7 @@ class SmartBMSDbus():
         self._dbusservice.add_path('/DeviceInstance', 288+int(device_port_num))
         self._dbusservice.add_path('/ProductId',     self._info['id'])
         self._dbusservice.add_path('/ProductName',     self._info['name'])
-        self._dbusservice.add_path('/FirmwareVersion', self._info['version'], gettextcallback=lambda p, v: "v{:.2f}".format(v))
+        self._dbusservice.add_path('/FirmwareVersion', self._info['version'], self._info['version'], gettextcallback=lambda p, v: "v"+v)
         self._dbusservice.add_path('/HardwareVersion', None)
         self._dbusservice.add_path('/Serial', self._serial_id)
         self._dbusservice.add_path('/Connected',     1)
