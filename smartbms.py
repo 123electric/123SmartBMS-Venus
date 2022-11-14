@@ -343,7 +343,7 @@ class SmartBMSDbus():
             'name'      : "123SmartBMS",
             'servicename' : "smartbms",
             'id'          : 0,
-            'version'    : "1.2~5"
+            'version'    : "1.2~6"
         }
         
         device_port = args.device[dev.rfind('/') + 1:]
