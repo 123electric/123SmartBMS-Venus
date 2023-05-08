@@ -1,3 +1,9 @@
+v1.10 - 8-5-2023
+-Round battery installed capacity per Ah as the resolution of the incoming battery data converted to Ah is about 1.8 - 2Ah for 48V
+-Round available capacity to per 0.1Ah
+-Bugfix: battery installed capacity and capacity were not completely correct due to slightly off LFP nominal voltage
+-Increased BMS last seen timeout to 60 seconds as that is still safe enough and may avoid false BMS lost alarms
+
 v1.9 - 4-11-2022
 -Decreased balancing time by better detection of when battery is full and balanced
 -Better discharge algorithm. When almost empty, keep DCL at 0A until voltage is 100mV higher and after some time

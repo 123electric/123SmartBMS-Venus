@@ -43,7 +43,7 @@ class DischargeState:
     discharge_blocked = 2
 
 class SmartBMSManagerDbus:
-    LAST_SEEN_TIMEOUT = 30
+    LAST_SEEN_TIMEOUT = 60
     
     BATTERY_CHARGE_STATE_BULKABSORPTION = 1
     BATTERY_CHARGE_STATE_STORAGE = 2
@@ -59,7 +59,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.9"
+            'version'    : "1.10"
         }
         self._device_instance = 287
 
@@ -93,7 +93,7 @@ class SmartBMSManagerDbus:
         self._dbusservice.add_path('/SystemSwitch',                         None)
         self._dbusservice.add_path('/Soc',                                  None, gettextcallback=lambda p, v: "{:.0f}%%".format(v))
         self._dbusservice.add_path('/Capacity',                             None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
-        self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
+        self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.0f}Ah".format(v))
         self._dbusservice.add_path('/ConsumedAmphours',                     None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
         self._dbusservice.add_path('/Dc/0/Voltage',                         None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/Dc/0/Current',                         None, gettextcallback=lambda p, v: "{:.1f}A".format(v))

@@ -20,11 +20,11 @@ from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 
 class BatteryChemistry:
-    LIFEPO4 = 0,
-    LTO = 1,
-    NMC = 2,
-    NCA = 3,
-    UNKNOWN = 255
+    UNKNOWN = 0,
+    LIFEPO4 = 1,
+    LTO = 2,
+    NMC = 3,
+    NCA = 4
 
 class MAFilter:
     def __init__(
@@ -44,7 +44,7 @@ class MAFilter:
  
 
 class SmartBMSSerial:
-    BMS_COMM_TIMEOUT = 10 # Seconds
+    BMS_COMM_TIMEOUT = 20 # Seconds
     BMS_COMM_BLOCK_SIZE = 58
 
     BATTERY_CHARGE_STATE_BULKABSORPTION = 1
@@ -134,7 +134,7 @@ class SmartBMSSerial:
         else: return BatteryChemistry.UNKNOWN
     
     def determine_nominal_cell_voltage(self, chemistry):
-        if chemistry == BatteryChemistry.LIFEPO4: return 3.4
+        if chemistry == BatteryChemistry.LIFEPO4: return 3.3
         if chemistry == BatteryChemistry.NMC: return 3.7
         if chemistry == BatteryChemistry.NCA: return 3.7
         if chemistry == BatteryChemistry.LTO: return 2.3
@@ -215,8 +215,8 @@ class SmartBMSSerial:
                             self.capacity = round(self._decode_value(buffer[49:51], 0.1), 1) # in kWh
                             self.nominal_battery_voltage = self.determine_nominal_cell_voltage(self.battery_chemistry)*self.cell_count
                             if self.nominal_battery_voltage != 0:
-                                self.capacity_ah = self.capacity*1000/self.nominal_battery_voltage
-                                self.energy_stored_ah = self.energy_stored_wh/self.nominal_battery_voltage
+                                self.capacity_ah = round(self.capacity*1000/self.nominal_battery_voltage)
+                                self.energy_stored_ah = round(self.energy_stored_wh/self.nominal_battery_voltage, 1)
                             else:
                                 self.capacity_ah = 0
                                 self.energy_stored_ah = 0
@@ -350,7 +350,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.9"
+            'version'    : "1.10"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
@@ -385,7 +385,7 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/SystemSwitch',                         None)
         self._dbusservice.add_path('/Soc',                                  None, gettextcallback=lambda p, v: "{:.0f}%%".format(v))
         self._dbusservice.add_path('/Capacity',                             None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
-        self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
+        self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.0f}Ah".format(v))
         self._dbusservice.add_path('/ConsumedAmphours',                     None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
         self._dbusservice.add_path('/UpdateTimestamp',                      None)
         self._dbusservice.add_path('/Dc/0/Voltage',                         None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
