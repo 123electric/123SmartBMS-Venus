@@ -1,3 +1,11 @@
+v1.11 - 8-2-2024
+-Added support for optional key-value pairs for the SmartBMS. This enables extra data to be received like SoH etc
+-Added firmware version display (from firmware v3.3.6)
+-Added charge cycle display (from firmware v3.3.6)
+-Added total charge and discharge kWh (from firmware v3.3.6)
+-Added SoH display (from firmware v3.3.6)
+-Discharge now limits/stops when the lowest cell voltage is a little under Vlow (instead of a little over Vmin). This can be handy when you set the Vmin at almost empty, for example 2.8V and Vlow with a little spare energy (2.97V). The battery voltage will then stay around Vlow and thus will not exceed Vmin and thus will not trigger the BMS to switch off the power relay
+
 v1.10 - 8-5-2023
 -Round battery installed capacity per Ah as the resolution of the incoming battery data converted to Ah is about 1.8 - 2Ah for 48V
 -Round available capacity to per 0.1Ah
