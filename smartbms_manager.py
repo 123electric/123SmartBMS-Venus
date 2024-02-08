@@ -59,7 +59,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.10"
+            'version'    : "1.11"
         }
         self._device_instance = 287
 
@@ -91,7 +91,8 @@ class SmartBMSManagerDbus:
         # Create the bms paths
         self._dbusservice.add_path('/TimeToGo',                             None)
         self._dbusservice.add_path('/SystemSwitch',                         None)
-        self._dbusservice.add_path('/Soc',                                  None, gettextcallback=lambda p, v: "{:.0f}%%".format(v))
+        self._dbusservice.add_path('/Soc',                                  None, gettextcallback=lambda p, v: "{:.0f}%".format(v))
+        self._dbusservice.add_path('/Soh',                                  None, gettextcallback=lambda p, v: "{:.0f}%".format(v))
         self._dbusservice.add_path('/Capacity',                             None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
         self._dbusservice.add_path('/InstalledCapacity',                    None, gettextcallback=lambda p, v: "{:.0f}Ah".format(v))
         self._dbusservice.add_path('/ConsumedAmphours',                     None, gettextcallback=lambda p, v: "{:.1f}Ah".format(v))
@@ -165,6 +166,7 @@ class SmartBMSManagerDbus:
                     '/Dc/0/Current': dummy,
                     '/Dc/0/Power': dummy,
                     '/Soc': dummy,
+                    '/Soh': dummy,
                     '/TimeToGo': dummy,
                     '/ConsumedAmphours': dummy,
                     '/Capacity': dummy,
@@ -183,9 +185,10 @@ class SmartBMSManagerDbus:
                     '/System/NrOfModulesBlockingCharge': dummy,
                     '/System/NrOfModulesBlockingDischarge': dummy,
                     '/System/BatteryChargeState': dummy,
-                    '/System/LowVoltageThreshold': dummy,
-                    '/System/HighVoltageThreshold': dummy,
+                    '/System/MinVoltageThreshold': dummy,
+                    '/System/MaxVoltageThreshold': dummy,
                     '/System/FullVoltageThreshold': dummy,
+                    '/System/LowVoltageThreshold' : dummy,
                     '/System/NrOfCells': dummy,
                     '/Io/AllowToCharge': dummy,
                     '/Io/AllowToDischarge': dummy},
@@ -256,12 +259,14 @@ class SmartBMSManagerDbus:
         bms.allowed_to_charge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingCharge') == 0
         bms.allowed_to_discharge = self._dbusmonitor.get_value(bms.service, '/System/NrOfModulesBlockingDischarge') == 0
         bms.soc = self._dbusmonitor.get_value(bms.service, '/Soc')
+        bms.soh = self._dbusmonitor.get_value(bms.service, '/Soh')
         bms.voltage = self._dbusmonitor.get_value(bms.service, '/Dc/0/Voltage')
         bms.current = self._dbusmonitor.get_value(bms.service, '/Dc/0/Current')
         bms.power = self._dbusmonitor.get_value(bms.service, '/Dc/0/Power')
-        bms.cell_voltage_min = self._dbusmonitor.get_value(bms.service, '/System/LowVoltageThreshold')
-        bms.cell_voltage_max = self._dbusmonitor.get_value(bms.service, '/System/HighVoltageThreshold')
+        bms.cell_voltage_min = self._dbusmonitor.get_value(bms.service, '/System/MinVoltageThreshold')
+        bms.cell_voltage_max = self._dbusmonitor.get_value(bms.service, '/System/MaxVoltageThreshold')
         bms.cell_voltage_full = self._dbusmonitor.get_value(bms.service, '/System/FullVoltageThreshold')
+        bms.cell_voltage_low = self._dbusmonitor.get_value(bms.service, '/System/LowVoltageThreshold')
         bms.cell_count = self._dbusmonitor.get_value(bms.service, '/System/NrOfCells')
         bms.time_to_go = self._dbusmonitor.get_value(bms.service, '/TimeToGo')
         bms.custom_name = self._dbusmonitor.get_value(bms.service, '/CustomName')
@@ -300,6 +305,7 @@ class SmartBMSManagerDbus:
             or bms_having_lowest_temperature == None \
             or bms_having_highest_temperature == None:
                 self._dbusservice["/Soc"] = None
+                self._dbusservice["/Soh"] = None
                 #self._dbusservice["/SystemSwitch"] = None
                 self._dbusservice["/ConsumedAmphours"] = None
                 self._dbusservice["/Capacity"] = None
@@ -331,6 +337,7 @@ class SmartBMSManagerDbus:
                 stored_ah = self._get_bmses_stored_ah()
                 installed_capacity = self._get_bmses_installed_capacity()
                 self._dbusservice["/Soc"] = self._get_bmses_soc()
+                self._dbusservice["/Soh"] = self._get_bmses_soh()
                 #self._dbusservice["/SystemSwitch"] = 1
                 self._dbusservice["/ConsumedAmphours"] = round(-1*(installed_capacity-stored_ah),1)+0 # Add zero to remove negative sigh from -0.0
                 self._dbusservice["/Capacity"] = self._get_bmses_stored_ah()
@@ -358,6 +365,7 @@ class SmartBMSManagerDbus:
                 #self._dbusservice["/Alarms/HighVoltage"] = 0
                 #self._dbusservice["/Alarms/LowTemperature"] = int(self.alarm_minimum_temperature)
                 #self._dbusservice["/Alarms/HighTemperature"] = int(self.alarm_maximum_temperature)
+               
 
             cell_voltage_min = self._get_bmses_cell_voltage_min()
             cell_count = self._get_bmses_cell_count()
@@ -466,6 +474,17 @@ class SmartBMSManagerDbus:
         # If calculated SoC is 100 and one or more BMS still indicate 99 because not fully balanced: keep it at 99%
         if calculated_soc == 100 and (not all_bmses_full): calculated_soc = 99
         return calculated_soc
+    
+    def _get_bmses_soh(self):
+        sum = 0
+        count = 0
+        for bms in self._managed_smartbmses:
+            if bms.soh != None:
+                sum += bms.soh
+                count += 1
+        
+        if count == 0: return None
+        return sum/count
 
     def _get_bmses_average_voltage(self):
         voltage_sum = 0
@@ -528,11 +547,11 @@ class SmartBMSManagerDbus:
                 return bms.cell_voltage_full
         return None
 
-    def _get_bmses_cell_voltage_max(self):
+    def _get_bmses_cell_voltage_low(self):
         for bms in self._managed_smartbmses:
             # Take value from first BMS with valid value
-            if bms.cell_voltage_max != None:
-                return bms.cell_voltage_max
+            if bms.cell_voltage_low != None:
+                return bms.cell_voltage_low
         return None
 
     def _get_bmses_cell_count(self):
@@ -557,6 +576,11 @@ class SmartBMSManagerDbus:
             if bms.allowed_to_discharge != None and (not bms.allowed_to_discharge):
                 blocking += 1
         return blocking
+    
+    def _get_discharge_stop_threshold(self):
+        vmin = self._get_bmses_cell_voltage_min()
+        vlow = self._get_bmses_cell_voltage_low()
+        return vlow - 0.02 if (vlow != None and vlow > vmin + 0.05) else vmin + 0.05
         
     def _calculate_current_limits(self):
         lowest_cell_voltage_bms = self._get_bmses_having_lowest_voltage()
@@ -593,7 +617,8 @@ class SmartBMSManagerDbus:
         # Discharge - DCL
         ############################################
         discharge_limit = discharge_capacity_sum*Constants.discharge_max_rating
-        discharge_limited_threshold = cell_voltage_min_bms+0.05
+        discharge_limited_threshold = self._get_discharge_stop_threshold()
+        self.discharge_limited_threshold = discharge_limited_threshold
         
         if self._discharge_state == DischargeState.discharge_allowed:
             # Basic SoC current limit table to prevent high values when SoC is low
@@ -636,9 +661,10 @@ class SmartBMSManagerDbus:
             else: # Over setpoint
                 self._discharge_voltage_controller_integral += error/20
             
-            # Very close to Vmin and discharging with quite some current? Try to reduce the charging current to a low value to prevent a Low Voltage Warning
+            # Got quite below discharge limited threshold and discharging with quite some current?
+            # Try to reduce the charging current to a low value to prevent a Low Voltage Warning
             # If there is some energy left in the battery, a rising integral will slowly make the discharge current bigger
-            if system_lowest_cell_voltage <= cell_voltage_min_bms + 0.02:
+            if system_lowest_cell_voltage <= discharge_limited_threshold - 0.03:
                 self._discharge_voltage_controller_integral = 50/discharge_voltage_controller_ki
 
             # Limit integral
@@ -661,12 +687,12 @@ class SmartBMSManagerDbus:
             # Then set DCL to 0A, which leads to the Multiplus giving an error
             
             # Needs to be below BMS Vempty, which is Vmin + 0.1V for a certain time, so the BMS knows the battery is empty and can finish the battery capacity
-            if system_lowest_cell_voltage <= round(cell_voltage_min_bms + 0.05, 2):
+            if system_lowest_cell_voltage <= round(discharge_limited_threshold, 2):
                 self._battery_empty_counter += 1
             else:
                 self._battery_empty_counter = max(0, self._battery_empty_counter-1)
             
-            if system_lowest_cell_voltage >= cell_voltage_min_bms+0.04 + Constants.discharge_restart_hysteresis_voltage:
+            if system_lowest_cell_voltage >= discharge_limited_threshold + Constants.discharge_restart_hysteresis_voltage:
                 self._discharge_restart_timer += 1
             else:
                 self._discharge_restart_timer = max(0, self._discharge_restart_timer-1)
@@ -684,7 +710,7 @@ class SmartBMSManagerDbus:
         elif self._discharge_state == DischargeState.discharge_blocked:
             self.max_discharge_current = 0
 
-            if system_lowest_cell_voltage >= cell_voltage_min_bms+0.04 + Constants.discharge_restart_hysteresis_voltage:
+            if system_lowest_cell_voltage >= discharge_limited_threshold + Constants.discharge_restart_hysteresis_voltage:
                 self._discharge_restart_timer += 1
             else:
                 self._discharge_restart_timer = max(0, self._discharge_restart_timer-1)
@@ -767,12 +793,14 @@ class SmartBMSDbus(object):
         self.stored_ah = None
         self.installed_capacity = None
         self.soc = None
+        self.soh = None
         self.voltage = None
         self.current = None
         self.power = None
         self.cell_voltage_min = None
         self.cell_voltage_max = None
         self.cell_voltage_full = None
+        self.cell_voltage_low = None
         self.cell_count = None
         self.time_to_go = None
         self.custom_name = None
