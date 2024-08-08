@@ -36,6 +36,7 @@ class Constants:
     charge_max_rating = 1.0                         # in C
     discharge_restart_hysteresis_voltage = 0.1      # in volt
     discharge_restart_time = 5*60                   # in seconds
+    connected_smartbms_watchdog_timeout = 30.0      # in seconds
 
 class DischargeState:
     discharge_allowed = 0
@@ -59,7 +60,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.11"
+            'version'    : "1.12"
         }
         self._device_instance = 287
 
@@ -129,6 +130,7 @@ class SmartBMSManagerDbus:
         # Cache of all connected SmartBMSes
         self._connected_smartbmses = []
         self._managed_smartbmses = []
+        self._connected_smartbms_watchdog_timer = Constants.connected_smartbms_watchdog_timeout
 
         self._system_soc = None
         self._battery_empty_counter = 0
@@ -187,8 +189,9 @@ class SmartBMSManagerDbus:
                     '/System/BatteryChargeState': dummy,
                     '/System/MinVoltageThreshold': dummy,
                     '/System/MaxVoltageThreshold': dummy,
-                    '/System/FullVoltageThreshold': dummy,
                     '/System/LowVoltageThreshold' : dummy,
+                    '/System/FullVoltageThreshold': dummy,
+                    '/System/BalanceVoltageThreshold' : dummy,
                     '/System/NrOfCells': dummy,
                     '/Io/AllowToCharge': dummy,
                     '/Io/AllowToDischarge': dummy},
@@ -209,6 +212,7 @@ class SmartBMSManagerDbus:
                 with self._data_lock:
                     self._scan_connected_smartbmses()
                     self._remove_disconnected_bmses()
+                    self._connected_bmses_watchdog()
                     self._determine_managed_smartbmses()
                     self._system_soc = self._dbusmonitor.get_value('com.victronenergy.system', '/Dc/Battery/Soc')
                 time.sleep(0.2)
@@ -216,7 +220,7 @@ class SmartBMSManagerDbus:
         except Exception as e:
             logging.critical('Fatal exception: ')
             logging.critical(e)
-            self._loop.quit()
+            os_exit(1)
 
     def _get_connected_service_list(self, classfilter=None):
         services = self._dbusmonitor.get_service_list(classfilter=classfilter)
@@ -242,7 +246,18 @@ class SmartBMSManagerDbus:
                 else:
                     self._update_bms_data(matching_bms[0])
     
-    
+    def _connected_bmses_watchdog(self):
+        # From time to time, the dbus does not report a SmartBMS device, while there is one.
+        # The solution is to restart so the dbus scans, again
+        if len(self._connected_smartbmses) < 1:
+            self._connected_smartbms_watchdog_timer -= 0.2 # Function called every 200ms
+        else:
+            self._connected_smartbms_watchdog_timer = Constants.connected_smartbms_watchdog_timeout
+
+        if self._connected_smartbms_watchdog_timer <= 0:
+            logging.critical('No BMS seen watchdog: exiting for restart')
+            os_exit(1)
+
     def _update_bms_data(self, bms):
         bms.last_seen = time.time()
         bms.lowest_voltage = self._dbusmonitor.get_value(bms.service, '/System/MinCellVoltage')
@@ -266,6 +281,7 @@ class SmartBMSManagerDbus:
         bms.cell_voltage_min = self._dbusmonitor.get_value(bms.service, '/System/MinVoltageThreshold')
         bms.cell_voltage_max = self._dbusmonitor.get_value(bms.service, '/System/MaxVoltageThreshold')
         bms.cell_voltage_full = self._dbusmonitor.get_value(bms.service, '/System/FullVoltageThreshold')
+        bms.cell_voltage_balance = self._dbusmonitor.get_value(bms.service, '/System/BalanceVoltageThreshold')
         bms.cell_voltage_low = self._dbusmonitor.get_value(bms.service, '/System/LowVoltageThreshold')
         bms.cell_count = self._dbusmonitor.get_value(bms.service, '/System/NrOfCells')
         bms.time_to_go = self._dbusmonitor.get_value(bms.service, '/TimeToGo')
@@ -546,6 +562,13 @@ class SmartBMSManagerDbus:
             if bms.cell_voltage_full != None:
                 return bms.cell_voltage_full
         return None
+    
+    def _get_bmses_cell_voltage_balance(self):
+        for bms in self._managed_smartbmses:
+            # Take value from first BMS with valid value
+            if bms.cell_voltage_balance != None:
+                return bms.cell_voltage_balance
+        return None
 
     def _get_bmses_cell_voltage_low(self):
         for bms in self._managed_smartbmses:
@@ -588,6 +611,7 @@ class SmartBMSManagerDbus:
         cell_voltage_min_bms = self._get_bmses_cell_voltage_min()
         cell_voltage_max_bms = self._get_bmses_cell_voltage_max()
         cell_voltage_full_bms = self._get_bmses_cell_voltage_full()
+        cell_voltage_balance_bms = self._get_bmses_cell_voltage_balance()
         cell_count = self._get_bmses_cell_count()
         soc = self._system_soc if self._system_soc != None else self._get_bmses_soc()
 
@@ -595,7 +619,7 @@ class SmartBMSManagerDbus:
         if self._get_bmses_sum_communication_error() > 0 or lowest_cell_voltage_bms == None or highest_cell_voltage_bms == None \
             or lowest_cell_voltage_bms.lowest_voltage == None or  highest_cell_voltage_bms.highest_voltage == None \
             or cell_voltage_min_bms == None or cell_voltage_max_bms == None \
-            or cell_voltage_full_bms == None or cell_count == None or soc == None:
+            or cell_voltage_full_bms == None or cell_voltage_balance_bms == None or cell_count == None or soc == None:
             self.max_discharge_current = None
             self.max_charge_current = None
             self.max_charge_voltage = None
@@ -731,14 +755,20 @@ class SmartBMSManagerDbus:
             self.max_charge_current = 0
         else:
             self.max_charge_current = charge_capacity_sum*Constants.charge_max_rating
+
+        # In some cases, the balance voltage and the Full threshold voltage are not the same. In almost any case, the balance voltage is the same or higher.
+        # For example when the user has an external balancer and does not want to use the internal passive balancing of the BMS
+        # When it seems that the BMS it's internal balancing is used, the cell voltages all need to get around or a bit above this value to get the battery  balanced
+        # In other cases, use the Full threshold
+        cell_voltage_target = cell_voltage_balance_bms if cell_voltage_balance_bms < 4.5 else cell_voltage_full_bms
         
-        highest_cell_voltage_target = round(cell_voltage_full_bms + 0.025, 3)
+        pid_cell_voltage_setpoint = round(cell_voltage_target + 0.025, 3)
         # If highest tcell voltage is near Vmax, then lower charging voltage significantly
         # Should not happen often, as the voltage control loop takes care of the charge voltage
         # In case one cell is still very close to Vmax, this safety cutoff will lower the charging voltage so much that the should not charge the battery anymore
-        # Take 2/3 of value between Vfull and Vmax as critical threshold to stop charging directly
-        charge_cutoff_voltage = max(cell_voltage_max_bms-0.05, round(cell_voltage_full_bms+(cell_voltage_max_bms-cell_voltage_full_bms)*2/3, 2))
-        charge_restore_voltage = highest_cell_voltage_target # Restart charging when the cell is balanced a little more. Use value of control loop so the two controls don't collide
+        # Take 2/3 of value between the target voltage and Vmax as critical threshold to stop charging directly
+        charge_cutoff_voltage = max(cell_voltage_max_bms-0.05, round(cell_voltage_target+(cell_voltage_max_bms-cell_voltage_target)*2/3, 2))
+        charge_restore_voltage = pid_cell_voltage_setpoint # Restart charging when the cell is balanced a little more. Use value of control loop so the two controls don't collide
         self._charge_safety_cutoff_active = hysteresis(system_highest_cell_voltage, self._charge_safety_cutoff_active, charge_restore_voltage, charge_cutoff_voltage)
         charge_safety_cutoff_voltage_reduction = -0.1 if self._charge_safety_cutoff_active else 0
 
@@ -747,7 +777,7 @@ class SmartBMSManagerDbus:
         if len(bmses_in_bulkabsorption) > 0:
              # Really need 25mV per cell headroom because otherwise we won't get all cells at Vbalance for at least 30 seconds
              # as the Victron can swing a little with the charge current, so sometimes a cell gets a little lower - in this case for example to 3.50V
-            voltage_upper_limit = (cell_voltage_full_bms + 0.02) * cell_count
+            voltage_upper_limit = (cell_voltage_target + 0.025) * cell_count
             # If code just started, set value to default
             if self.max_charge_voltage == 0: self.max_charge_voltage = voltage_upper_limit
             
@@ -755,7 +785,7 @@ class SmartBMSManagerDbus:
             # When the battery is balanced, charge to a voltage a little lower so no balancing energy is wasted
             charge_voltage_controller_kp = 0.4
             charge_voltage_controller_ki = 0.01
-            charge_voltage_controller_setpoint = highest_cell_voltage_target
+            charge_voltage_controller_setpoint = pid_cell_voltage_setpoint
             charge_voltage_controller_input = system_highest_cell_voltage
             charge_voltage_controller_error = charge_voltage_controller_setpoint - charge_voltage_controller_input # Value when over full threshold - example: -0.1 (100mV over threshold)
             # Add some blindspot for error so we do not keep changing when within certain bounds
@@ -768,13 +798,18 @@ class SmartBMSManagerDbus:
             # Testing gives result that ki*integral really sometimes needs to -0.13, so -0.15 is the minimum
             if self._charge_voltage_controller_integral*charge_voltage_controller_ki < -0.15: self._charge_voltage_controller_integral = -0.15/charge_voltage_controller_ki
             charge_voltage_controller_output = round(charge_voltage_controller_kp * charge_voltage_controller_error + charge_voltage_controller_ki * self._charge_voltage_controller_integral, 3)
-            charge_voltage = round((highest_cell_voltage_target + charge_voltage_controller_output + charge_safety_cutoff_voltage_reduction) * cell_count, 2)
+            charge_voltage = round((pid_cell_voltage_setpoint + charge_voltage_controller_output + charge_safety_cutoff_voltage_reduction) * cell_count, 2)
+            logging.debug('Charge voltage PID setpoint: {} controller output: {} safety cutoff reduction: {}'.format(
+                pid_cell_voltage_setpoint,
+                charge_voltage_controller_output,
+                charge_safety_cutoff_voltage_reduction
+            ))
             self.max_charge_voltage = min(charge_voltage, voltage_upper_limit)
         else:
-            if cell_voltage_full_bms == 3.4 or cell_voltage_full_bms == 3.5 or cell_voltage_full_bms == 3.6: # LiFePO4
+            if 3.38 <= cell_voltage_target <= 3.6: # LiFePO4
                 self.max_charge_voltage = ((Constants.float_voltage_lifepo4 + charge_safety_cutoff_voltage_reduction) * cell_count)
             else: # Other chemistries
-                self.max_charge_voltage = ((cell_voltage_full_bms - 0.05 + charge_safety_cutoff_voltage_reduction) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
+                self.max_charge_voltage = ((cell_voltage_target - 0.05 + charge_safety_cutoff_voltage_reduction) * cell_count) # A little under the full voltage to prevent the BMS from balancing all the time
             charge_voltage_controller_ki = 0 # Reset controller
 
 class SmartBMSDbus(object):
@@ -800,6 +835,7 @@ class SmartBMSDbus(object):
         self.cell_voltage_min = None
         self.cell_voltage_max = None
         self.cell_voltage_full = None
+        self.cell_voltage_balance = None
         self.cell_voltage_low = None
         self.cell_count = None
         self.time_to_go = None

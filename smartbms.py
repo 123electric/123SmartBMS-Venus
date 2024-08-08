@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
+from os import _exit as os_exit
 
 # Victron packages
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
@@ -18,6 +19,9 @@ import dbus.service
 import ve_utils
 from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
+
+class Constants:
+    connection_watchdog_timeout = 10.0      # in seconds
 
 class BatteryChemistry:
     UNKNOWN = 0,
@@ -107,6 +111,7 @@ class SmartBMSSerial:
         self.cell_voltage_min = 0
         self.cell_voltage_max = 0
         self.cell_voltage_full = 0
+        self.cell_voltage_balance = 0
         self.cell_voltage_nominal = None
         self.consumed_ah = 0
         self.cell_voltage_nominal_received = None
@@ -129,6 +134,7 @@ class SmartBMSSerial:
         self.charged_energy = None
         self.discharged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(), KeyValuePairGuard()] # Contains 3 bytes
         self.discharged_energy = None
+        self.cell_voltage_full_guard = [KeyValuePairGuard(), KeyValuePairGuard()] # Contains high and low byte
         # End option key-value pairs
 
 
@@ -193,7 +199,7 @@ class SmartBMSSerial:
         # If serial is not available/lost: terminate program
         if not self._is_com_available(self.dev):
             print('Serial lost: terminating...')
-            self.loop.quit()
+            os_exit(1)
             return
 
         self.battery_chemistry = self.determine_chemistry()
@@ -221,6 +227,7 @@ class SmartBMSSerial:
             time.sleep(0.5)
             self._ser = serial.Serial(dev, 9600)
             self.time_started = time.time()
+            self._connection_watchdog_timeout = Constants.connection_watchdog_timeout
 
             while(1):
                 if len(test_packet) > 0:
@@ -244,17 +251,25 @@ class SmartBMSSerial:
                             self.lock.acquire()
                             self._parse_bms_data(buffer)
                             self.last_received = time.time()
+                            self._connection_watchdog_timeout = Constants.connection_watchdog_timeout
                             self.lock.release()
                 
                         buffer_index = 0
                 elif len(read_data) == 0:
                     buffer_index = 0
 
+                self._connection_watchdog()
                 time.sleep(0.2)
         except Exception as e:
             print('Fatal exception: ')
             print(e)
-            self.loop.quit()
+            os_exit(1)
+    
+    def _connection_watchdog(self):
+        self._connection_watchdog_timeout -= 0.2 # Function called every 0.2 seconds
+
+        if self._connection_watchdog_timeout <= 0:
+            os_exit(1)
 
     def _parse_bms_data(self, buffer):
         # Start parsing optional key-value pairs
@@ -278,9 +293,11 @@ class SmartBMSSerial:
             elif key == 13: self.discharged_energy_guard[0].update(buffer[48])
             elif key == 14: self.discharged_energy_guard[1].update(buffer[48])
             elif key == 15: self.discharged_energy_guard[2].update(buffer[48])
+            elif key == 17: self.cell_voltage_full_guard[0].update(buffer[48])
+            elif key == 18: self.cell_voltage_full_guard[1].update(buffer[48])
         # End parsing optional key-value pairs
 
-        self.cell_voltage_full = self._decode_voltage(buffer[55:57])
+        self.cell_voltage_balance = self._decode_voltage(buffer[55:57])
         self.cell_voltage_min = self._decode_voltage(buffer[51:53])
         self.cell_voltage_max = self._decode_voltage(buffer[53:55])
         self.battery_voltage = round(self._decode_voltage(buffer[0:3]), 2)
@@ -341,6 +358,9 @@ class SmartBMSSerial:
         
         cell_voltage_nominal = [self.cell_voltage_nominal_guard[0].get(), self.cell_voltage_nominal_guard[1].get()]
         self.cell_voltage_nominal_received = self._decode_voltage(bytearray(cell_voltage_nominal)) if (None not in cell_voltage_nominal) else None
+
+        cell_voltage_full = [self.cell_voltage_full_guard[0].get(), self.cell_voltage_full_guard[1].get()]
+        self.cell_voltage_full = self._decode_voltage(bytearray(cell_voltage_full)) if (None not in cell_voltage_full) else self.cell_voltage_balance
         
         firmware_version_split = [self.firmware_version_guard[0].get(), self.firmware_version_guard[1].get()]
         if None not in firmware_version_split:
@@ -466,7 +486,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.11"
+            'version'    : "1.12"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
@@ -529,6 +549,7 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/System/MinVoltageThreshold',           None)
         self._dbusservice.add_path('/System/MaxVoltageThreshold',           None)
         self._dbusservice.add_path('/System/FullVoltageThreshold',          None)
+        self._dbusservice.add_path('/System/BalanceVoltageThreshold',       None)
         self._dbusservice.add_path('/System/LowVoltageThreshold',           None)
         self._dbusservice.add_path('/System/NominalVoltageThreshold',       None)
         self._dbusservice.add_path('/System/NrOfCells',                     None) 
@@ -582,6 +603,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             self._dbusservice["/System/MinVoltageThreshold"] = None
             self._dbusservice["/System/MaxVoltageThreshold"] = None
             self._dbusservice["/System/FullVoltageThreshold"] = None
+            self._dbusservice["/System/BalanceVoltageThreshold"] = None
             self._dbusservice["/System/LowVoltageThreshold"] = None
             self._dbusservice["/System/NominalVoltageThreshold"] = None
             self._dbusservice["/System/NrOfCells"] = None
@@ -625,6 +647,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             self._dbusservice["/System/MinVoltageThreshold"] = self.cell_voltage_min
             self._dbusservice["/System/MaxVoltageThreshold"] = self.cell_voltage_max
             self._dbusservice["/System/FullVoltageThreshold"] = self.cell_voltage_full
+            self._dbusservice["/System/BalanceVoltageThreshold"] = self.cell_voltage_balance
             self._dbusservice["/System/LowVoltageThreshold"] = self.cell_voltage_low
             self._dbusservice["/System/NominalVoltageThreshold"] = self.cell_voltage_nominal
             self._dbusservice["/System/NrOfCells"] = self.cell_count
@@ -683,7 +706,9 @@ if __name__ == "__main__":
     mainloop = GLib.MainLoop()
     bms_dbus = SmartBMSToDbus(mainloop, args.device, device_serial_numbers[args.device])
 
-    time.sleep(8) # Wait until we have received some data and the filters are filled
+    # Wait until we have received all data and the filters are filled
+    # It can take up to 18 seconds before all key-value pairs are transmitted
+    time.sleep(20)
 
     GLib.timeout_add(1000, lambda: ve_utils.exit_on_error(handle_timer_tick))
     mainloop.run()
