@@ -59,7 +59,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.11"
+            'version'    : "1.13"
         }
         self._device_instance = 287
 
