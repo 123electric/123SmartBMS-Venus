@@ -94,6 +94,7 @@ class SmartBMSSerial:
         self.discharge_current = 0
         self.battery_current = 0
         self.soc = 0
+        self.individual_cell_info = {}
         self.lowest_cell_voltage = 0
         self.lowest_cell_voltage_num = 0
         self.highest_cell_voltage = 0
@@ -317,6 +318,17 @@ class SmartBMSSerial:
         self.energy_stored_wh = self._decode_value(buffer[34:37], 1)
         self.capacity = round(self._decode_value(buffer[49:51], 0.1), 1) # in kWh
 
+        cell_info_nr = buffer[24] # number of cell whose data is transferred
+        cell_info_voltage = self._decode_voltage(buffer[26:28])
+        cell_info_temperature = self._decode_temperature(buffer[28:30])
+        self.individual_cell_info[cell_info_nr] = CellInfo(cell_info_voltage, cell_info_temperature)
+        # In case the cell count changed or if false data came in, throw out all non-updatable cell info elements
+        for key, value in self.individual_cell_info.items():
+            if key > self.cell_count:
+                self.individual_cell_info.pop(key)
+
+        # Bit filters on all bits because one false received bit can have big consequences
+        # The filter ensures that the value needs to be received self.individual_cell_infomultiple times before having an effect
         self.alarm_minimum_voltage_ma_filter.add(True if (buffer[30] & 0b00001000) else False)
         self.alarm_maximum_voltage_ma_filter.add(True if (buffer[30] & 0b00010000) else False)
         self.alarm_minimum_temperature_ma_filter.add(True if (buffer[30] & 0b00100000) else False)
@@ -531,10 +543,9 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/Dc/0/Temperature',                     None)
         self._dbusservice.add_path('/Io/AllowToCharge',                     None)
         self._dbusservice.add_path('/Io/AllowToDischarge',                  None)
-        #self._dbusservice.add_path('/Voltages/Cell1',                      None)
-        #self._dbusservice.add_path('/Voltages/Cell2',                      None)
         self._dbusservice.add_path('/System/MaxCellVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/System/MinCellVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
+        self._dbusservice.add_path('/Voltages/Diff',                        None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/System/MinVoltageCellId',              None)
         self._dbusservice.add_path('/System/MaxVoltageCellId',              None)
         self._dbusservice.add_path('/System/MinCellTemperature',            None)
@@ -561,6 +572,8 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/History/ChargedEnergy',                None, gettextcallback=lambda p, v: "{:.0f}kWh".format(v))
         self._dbusservice.add_path('/History/DischargedEnergy',             None, gettextcallback=lambda p, v: "{:.0f}kWh".format(v))
         
+        self._registered_individual_cells = []
+
         # Register persistent settings
         self._settings_register()
         # Register paths which can be externally changed, for example via the GUI
@@ -569,6 +582,13 @@ class SmartBMSToDbus(SmartBMSSerial):
     def update(self):
         super().update() # Needs to be called 1x per second
         
+        for key in self.individual_cell_info:
+            if key not in self._registered_individual_cells:
+                self._registered_individual_cells.append(key)
+                voltage_path = '/Voltages/Cell' + str(key)
+                temperature_path = '/Temperature/Cell' + str(key)
+                self._dbusservice.add_path(voltage_path, None)
+                self._dbusservice.add_path(temperature_path, None)
 
         if self.alarm_cell_communication or self.alarm_serial_communication:
             self._dbusservice["/Connected"] = 1
@@ -587,6 +607,12 @@ class SmartBMSToDbus(SmartBMSSerial):
             self._dbusservice["/Dc/0/Temperature"] = None
             self._dbusservice["/Io/AllowToCharge"] = None
             self._dbusservice["/Io/AllowToDischarge"] = None
+            for cell_nr in self._registered_individual_cells:
+                self._dbusservice['/Voltages/Cell' + str(cell_nr)] = None
+                self._dbusservice['/Temperature/Cell' + str(cell_nr)] = None
+
+            self._dbusservice["/Voltages/Diff"] = None
+            self._dbusservice["/Temperature/Cell1"] = None
             self._dbusservice["/System/MinCellVoltage"] = None
             self._dbusservice["/System/MinVoltageCellId"] = None
             self._dbusservice["/System/MaxCellVoltage"] = None
@@ -631,6 +657,18 @@ class SmartBMSToDbus(SmartBMSSerial):
             self._dbusservice["/Dc/0/Temperature"] = self.highest_cell_temperature
             self._dbusservice["/Io/AllowToCharge"] = int(self.allowed_to_charge)
             self._dbusservice["/Io/AllowToDischarge"] = int(self.allowed_to_discharge)
+            self._dbusservice["/Voltages/Diff"] = round((self.highest_cell_voltage - self.lowest_cell_voltage), 2)
+            
+            for cell_nr in self._registered_individual_cells:
+                if cell_nr not in self.individual_cell_info:
+                    voltage = None
+                    temperature = None
+                else:
+                    voltage = round(self.individual_cell_info[cell_nr].voltage, 2)
+                    temperature = self.individual_cell_info[cell_nr].temperature
+                self._dbusservice['/Voltages/Cell' + str(cell_nr)] = voltage
+                self._dbusservice['/Temperature/Cell' + str(cell_nr)] = temperature
+            
             self._dbusservice["/System/MinCellVoltage"] = round(self.lowest_cell_voltage, 2)
             self._dbusservice["/System/MinVoltageCellId"] = self.lowest_cell_voltage_num
             self._dbusservice["/System/MaxCellVoltage"] = round(self.highest_cell_voltage, 2)
@@ -658,7 +696,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             self._dbusservice["/History/ChargeCycles"] = self.charge_cycles
             self._dbusservice["/History/ChargedEnergy"] = self.charged_energy
             self._dbusservice["/History/DischargedEnergy"] = self.discharged_energy
-        
+
         # Beeds to be the last thing so others know we finished updating
         self._dbusservice["/UpdateTimestamp"] = int(time.time())
     
@@ -677,6 +715,11 @@ class SmartBMSToDbus(SmartBMSSerial):
                 'CustomName': ['/Settings/123electric/Products/'+ self._serial_id + '/CustomName', self._info['name'], 0, 0]
                 },
                 eventCallback = self._settings_handle_changed)
+
+class CellInfo(object):
+    def __init__(self, voltage, temperature):
+        self.voltage = voltage
+        self.temperature = temperature
 
 # Called on a one second timer
 def handle_timer_tick():
