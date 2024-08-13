@@ -587,7 +587,7 @@ class SmartBMSToDbus(SmartBMSSerial):
                 self._registered_individual_cells.append(key)
                 voltage_path = '/Voltages/Cell' + str(key)
                 temperature_path = '/Temperature/Cell' + str(key)
-                self._dbusservice.add_path(voltage_path, None)
+                self._dbusservice.add_path(voltage_path, None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
                 self._dbusservice.add_path(temperature_path, None)
 
         if self.alarm_cell_communication or self.alarm_serial_communication:
@@ -667,7 +667,7 @@ class SmartBMSToDbus(SmartBMSSerial):
                     voltage = round(self.individual_cell_info[cell_nr].voltage, 2)
                     temperature = self.individual_cell_info[cell_nr].temperature
                 self._dbusservice['/Voltages/Cell' + str(cell_nr)] = voltage
-                self._dbusservice['/Temperature/Cell' + str(cell_nr)] = temperature
+                self._dbusservice['/Temperatures/Cell' + str(cell_nr)] = temperature
             
             self._dbusservice["/System/MinCellVoltage"] = round(self.lowest_cell_voltage, 2)
             self._dbusservice["/System/MinVoltageCellId"] = self.lowest_cell_voltage_num
