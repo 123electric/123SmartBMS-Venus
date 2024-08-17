@@ -31,41 +31,42 @@ class BatteryChemistry:
     NCA = 4
 
 class MAFilter:
-    def __init__(
-        self,
-        filter_size,
-        initial_value):
-        self.buffer = [initial_value]*filter_size
+    '''
+    Add a doc string
+    '''
+    def __init__(self, filter_size: int, initial_value: bool):
+        self.buffer = [initial_value for _ in range(filter_size)]
         self.pos = 0
         self.filter_size = filter_size
 
-    def add(self, value):
+    def add(self, value: float):
         self.buffer[self.pos] = value
         self.pos = (self.pos+1) % self.filter_size
 
-    def get_average(self):
+    def get_average(self) -> float:
         return sum(self.buffer)/self.filter_size
     
 class KeyValuePairGuard:
-    # This class keeps track of a key-value pair and when it was last updated.
-    # If the last updated value was longer than timeout, get() will return None
-    # Each second, a new key-value pair is transmitted.
-    # We do not expect to ever have more than 20 key-value pairs.
-    # The cycle time of a specific key-value pair then is ~20 seconds.
-    # Thus, a timeout tripple of this should be sufficient
+    '''
+    This class keeps track of a key-value pair and when it was last updated.
+    If the last updated value was longer than timeout, get() will return None
+    Each second, a new key-value pair is transmitted.
+    We do not expect to ever have more than 20 key-value pairs.
+    The cycle time of a specific key-value pair then is ~20 seconds.
+    Thus, a timeout triple of this should be sufficient
+    '''
     TIMEOUT = 60 # Seconds
 
-    def __init__(
-        self
-    ):
+    def __init__(self):
         self.last_updated = 0
 
-    def update(self, value):
+    def update(self, value: float):
         self.value = value
         self.last_updated = time.time()
 
     def get(self):
-        if time.time() > self.last_updated + self.TIMEOUT:
+        timed_out = time.time() > self.last_updated + self.TIMEOUT
+        if timed_out:
             return None
         else:
             return self.value
@@ -73,17 +74,13 @@ class KeyValuePairGuard:
 
 class SmartBMSSerial:
     BMS_COMM_TIMEOUT = 20 # Seconds
-    BMS_COMM_BLOCK_SIZE = 58
+    BMS_COMM_BLOCK_SIZE = 58 # Byte size?
 
     BATTERY_CHARGE_STATE_BULKABSORPTION = 1
     BATTERY_CHARGE_STATE_STORAGE = 2
     BATTERY_CHARGE_STATE_ERROR = 3
      
-    def __init__(
-        self,
-        loop,
-        dev
-    ):
+    def __init__(self, loop, dev):
         self.loop = loop
         self.dev = dev
         
@@ -131,9 +128,11 @@ class SmartBMSSerial:
         self.firmware_version = None
         self.charge_cycles_guard = [KeyValuePairGuard(), KeyValuePairGuard()] # Contains high and low byte
         self.charge_cycles = None
-        self.charged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(), KeyValuePairGuard()] # Contains 3 bytes
+        self.charged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(),
+                                     KeyValuePairGuard()] # Contains 3 bytes
         self.charged_energy = None
-        self.discharged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(), KeyValuePairGuard()] # Contains 3 bytes
+        self.discharged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(),
+                                        KeyValuePairGuard()] # Contains 3 bytes
         self.discharged_energy = None
         self.cell_voltage_full_guard = [KeyValuePairGuard(), KeyValuePairGuard()] # Contains high and low byte
         # End option key-value pairs
@@ -174,11 +173,8 @@ class SmartBMSSerial:
     
     @property
     def alarm_serial_communication(self):
-        if time.time() > self.last_received + self.BMS_COMM_TIMEOUT:
-            return True
-        else:
-            return False
-
+        return time.time() > self.last_received + self.BMS_COMM_TIMEOUT
+    
     def determine_chemistry(self):
         if self.cell_voltage_full >= 3.4 and self.cell_voltage_full <= 3.7: return BatteryChemistry.LIFEPO4
         elif self.cell_voltage_min >= 3.425 and self.cell_voltage_full >= 3.8 and self.cell_voltage_full <= 4.4: return BatteryChemistry.NMC
