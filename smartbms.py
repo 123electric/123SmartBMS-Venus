@@ -581,7 +581,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             if key not in self._registered_individual_cells:
                 self._registered_individual_cells.append(key)
                 voltage_path = '/Voltages/Cell' + str(key)
-                temperature_path = '/Temperature/Cell' + str(key)
+                temperature_path = '/Temperatures/Cell' + str(key)
                 self._dbusservice.add_path(voltage_path, None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
                 self._dbusservice.add_path(temperature_path, None)
 
