@@ -174,21 +174,49 @@ class SmartBMSSerial:
     def alarm_serial_communication(self):
         return time.time() > self.last_received + self.BMS_COMM_TIMEOUT
     
-    def determine_chemistry(self):
-        if self.cell_voltage_full >= 3.4 and self.cell_voltage_full <= 3.7: return BatteryChemistry.LIFEPO4
-        elif self.cell_voltage_min >= 3.425 and self.cell_voltage_full >= 3.8 and self.cell_voltage_full <= 4.4: return BatteryChemistry.NMC
-        elif self.cell_voltage_full >= 3.8 and self.cell_voltage_full <= 4.4: return BatteryChemistry.NCA
-        elif self.cell_voltage_min >= 3.425: return BatteryChemistry.NMC
-        elif self.cell_voltage_min >= 3.2: return BatteryChemistry.NCA
-        elif self.cell_voltage_full >= 2.5 and self.cell_voltage_full <= 2.8: return BatteryChemistry.LTO
-        else: return BatteryChemistry.UNKNOWN
+    def determine_chemistry(self) -> int:
+        '''
+        Determines and returns the battery chemistry corresponding int value
+        '''
+
+        is_LIFEPO4_strict = self.cell_voltage_full >= 3.4 and self.cell_voltage_full <= 3.7 # these voltages should be given a specficied voltage name
+        is_NMC_strict = self.cell_voltage_min >= 3.425 and self.cell_voltage_full >= 3.8 and self.cell_voltage_full <= 4.4
+        is_NCA_strict = self.cell_voltage_full >= 3.8 and self.cell_voltage_full <= 4.4
+        is_NMC_relaxed = self.cell_voltage_min >= 3.425
+        is_NCA_relaxed = self.cell_voltage_min >= 3.2
+        is_LTO_strict =  self.cell_voltage_full >= 2.5 and self.cell_voltage_full <= 2.8
+
+        if is_LIFEPO4_strict:
+            return BatteryChemistry.LIFEPO4
+        elif is_NMC_strict:
+            return BatteryChemistry.NMC
+        elif is_NCA_strict:
+            return BatteryChemistry.NCA
+        elif is_NMC_relaxed:
+            return BatteryChemistry.NMC
+        elif is_NCA_relaxed:
+            return BatteryChemistry.NCA
+        elif is_LTO_strict:
+            return BatteryChemistry.LTO
+        else:
+            return BatteryChemistry.UNKNOWN
     
-    def determine_nominal_cell_voltage(self, chemistry):
-        if chemistry == BatteryChemistry.LIFEPO4: return 3.3
-        if chemistry == BatteryChemistry.NMC: return 3.7
-        if chemistry == BatteryChemistry.NCA: return 3.7
-        if chemistry == BatteryChemistry.LTO: return 2.3
-        return 3.3 # Failsafe, most customers have LiFePO4
+    def determine_nominal_cell_voltage(self, chemistry: int) -> float:
+        '''
+        Returns the nominal cell voltage for the given chemistry
+        '''
+        LIFEPO4_voltage = 3.3
+        NMC_voltage = 3.7
+        NCA_voltage = 3.7
+        LTO_voltage = 2.3
+        
+        if chemistry == BatteryChemistry.NMC:
+            return NMC_voltage
+        if chemistry == BatteryChemistry.NCA:
+            return NCA_voltage
+        if chemistry == BatteryChemistry.LTO:
+            return LTO_voltage
+        return LIFEPO4_voltage # Failsafe, most customers have LiFePO4
     
     # Must be called every second
     def update(self):
@@ -218,14 +246,20 @@ class SmartBMSSerial:
         try:
             # The SmartBMS transmits each 500ms or 1000ms a message containing 58 bytes
             # When the serial does not contain any new bytes and no complete message was received, empty the buffer and wait for a new message
-            buffer = bytearray (self.BMS_COMM_BLOCK_SIZE)
+            
+            sleep_time_delay = 0.5
+            sleep_time_refresh = 0.2
             buffer_index = 0
-            time.sleep(0.5)
-            self._ser = serial.Serial(dev, 9600)
+            baud = 9600
+            max_bms_comm_block_size = self.BMS_COMM_BLOCK_SIZE - 1
+
+            buffer = bytearray (self.BMS_COMM_BLOCK_SIZE)
+            time.sleep(sleep_time_delay) 
+            self._ser = serial.Serial(dev, baud) 
             self.time_started = time.time()
             self._connection_watchdog_timeout = Constants.connection_watchdog_timeout
 
-            while(1):
+            while(True):
                 if len(test_packet) > 0:
                     read_data = test_packet
                 else:
@@ -234,16 +268,16 @@ class SmartBMSSerial:
 
                 if len(read_data) > 0:
                     for c in read_data:
-                        if buffer_index <= self.BMS_COMM_BLOCK_SIZE-1:
+                        if buffer_index <= max_bms_comm_block_size:
                             buffer[buffer_index] = c
                         buffer_index += 1
         
                 if buffer_index == self.BMS_COMM_BLOCK_SIZE:
                         checksum = 0
-                        for i in range (self.BMS_COMM_BLOCK_SIZE-1):
+                        for i in range(max_bms_comm_block_size):
                             checksum += buffer[i]
-                        received_checksum = buffer[self.BMS_COMM_BLOCK_SIZE-1]
-                        if(checksum & 0xff) == received_checksum:
+                        received_checksum = buffer[max_bms_comm_block_size]
+                        if (checksum & 0xff) == received_checksum:
                             self.lock.acquire()
                             self._parse_bms_data(buffer)
                             self.last_received = time.time()
@@ -255,7 +289,7 @@ class SmartBMSSerial:
                     buffer_index = 0
 
                 self._connection_watchdog()
-                time.sleep(0.2)
+                time.sleep(sleep_time_refresh)
         except Exception as e:
             print('Fatal exception: ')
             print(e)
