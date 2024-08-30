@@ -234,6 +234,7 @@ class SmartBMSSerial:
         if self.alarm_serial_communication and not self._comm_error_shadow:
             self._comm_error_shadow = True
             print('Serial comm error')
+            
         if not self.alarm_serial_communication and self._comm_error_shadow:
             self._comm_error_shadow = False
             print('Serial comm restored')
@@ -307,7 +308,7 @@ class SmartBMSSerial:
             key = buffer[47] - 25
             if key == 0: self._combine_key_value_pairs() # Start of new cycle, combine all received value
 
-            if key == 0: self.soh_guard.update(buffer[48])
+            if key == 0: self.soh_guard.update(buffer[48]) # replace 48 with a variable
             elif key == 1: self.charge_efficiency_guard.update(buffer[48])
             elif key == 2: self.cell_voltage_low_guard[0].update(buffer[48])
             elif key == 3: self.cell_voltage_low_guard[1].update(buffer[48])
@@ -358,20 +359,25 @@ class SmartBMSSerial:
 
         # Bit filters on all bits because one false received bit can have big consequences
         # The filter ensures that the value needs to be received self.individual_cell_infomultiple times before having an effect
-        self.alarm_minimum_voltage_ma_filter.add(True if (buffer[30] & 0b00001000) else False)
+        half = 0.5
+        # voltage filter
+        self.alarm_minimum_voltage_ma_filter.add(True if (buffer[30] & 0b00001000) else False) 
         self.alarm_maximum_voltage_ma_filter.add(True if (buffer[30] & 0b00010000) else False)
+        # temperature
         self.alarm_minimum_temperature_ma_filter.add(True if (buffer[30] & 0b00100000) else False)
         self.alarm_maximum_temperature_ma_filter.add(True if (buffer[30] & 0b01000000) else False)
+
         self.alarm_cell_communication_ma_filter.add(True if (buffer[30] & 0b00000100) else False)
         self.allowed_to_discharge_ma_filter.add(True if (buffer[30] & 0b00000010) else False)
         self.allowed_to_charge_ma_filter.add(True if (buffer[30] & 0b00000001) else False)
-        self.alarm_minimum_voltage = self.alarm_minimum_voltage_ma_filter.get_average() > 0.5
-        self.alarm_maximum_voltage = self.alarm_maximum_voltage_ma_filter.get_average() > 0.5
-        self.alarm_minimum_temperature = self.alarm_minimum_temperature_ma_filter.get_average() > 0.5
-        self.alarm_maximum_temperature = self.alarm_maximum_temperature_ma_filter.get_average() > 0.5
-        self.alarm_cell_communication = self.alarm_cell_communication_ma_filter.get_average() > 0.5
-        self.allowed_to_discharge = self.allowed_to_discharge_ma_filter.get_average() > 0.5
-        self.allowed_to_charge =  self.allowed_to_charge_ma_filter.get_average() > 0.5
+
+        self.alarm_minimum_voltage = self.alarm_minimum_voltage_ma_filter.get_average() > half
+        self.alarm_maximum_voltage = self.alarm_maximum_voltage_ma_filter.get_average() > half
+        self.alarm_minimum_temperature = self.alarm_minimum_temperature_ma_filter.get_average() > half
+        self.alarm_maximum_temperature = self.alarm_maximum_temperature_ma_filter.get_average() > half
+        self.alarm_cell_communication = self.alarm_cell_communication_ma_filter.get_average() > half
+        self.allowed_to_discharge = self.allowed_to_discharge_ma_filter.get_average() > half
+        self.allowed_to_charge =  self.allowed_to_charge_ma_filter.get_average() > half
 
         # Start calculation of derived parameters
         # Important to place this as last part. This ensures that used parameters are already parsed
@@ -388,11 +394,12 @@ class SmartBMSSerial:
         # End calculation
 
     def _combine_key_value_pairs(self):
+        full = 100
         soh_raw = self.soh_guard.get()
-        self.soh = soh_raw if soh_raw is not None and soh_raw <= 100 else None
+        self.soh = soh_raw if soh_raw is not None and soh_raw <= full else None
 
         charge_efficiency_raw = self.charge_efficiency_guard.get()
-        self.charge_efficiency = charge_efficiency_raw if charge_efficiency_raw is not None and charge_efficiency_raw <= 100 else None
+        self.charge_efficiency = charge_efficiency_raw if charge_efficiency_raw is not None and charge_efficiency_raw <= full else None
         
         cell_voltage_low = [self.cell_voltage_low_guard[0].get(), self.cell_voltage_low_guard[1].get()]
         self.cell_voltage_low = self._decode_voltage(bytearray(cell_voltage_low)) if (None not in cell_voltage_low) else None
@@ -451,31 +458,46 @@ class SmartBMSSerial:
 
     def _update_time_to_go(self):
         # Filter current with a 3 minute moving average filter to stabilize the time-to-go
-        if len(self._current_filter) >= 180:
+        three_minutes = 180 # time in sec
+        one_hour = 60*60    # time in sec
+
+        if len(self._current_filter) >= three_minutes:
             self._current_filter.popleft()
         self._current_filter.append(self.battery_current)
         
         current_filter_sum = 0
         for value in self._current_filter:
             current_filter_sum += value
+
         current_filter_average = current_filter_sum/len(self._current_filter)
         battery_power_filtered = (self.nominal_battery_voltage * -1 * current_filter_average)
         normalized_power = self.capacity*1000*0.05 # The battery capacity was rated at a current of <= 0.05C -> calculate this measurement current (in wh)
         if current_filter_average < 0 and battery_power_filtered > 0 and normalized_power > 0 and self.capacity > 0: # > 0 to avoid divide by zero
             # When discharge power is bigger than normalized current, use Peukert-like formula
             if battery_power_filtered > normalized_power:
-                time_to_go_from_full =  60 * 60 * (self.capacity*1000)/(pow(battery_power_filtered/normalized_power, 1.02))/normalized_power
+                time_to_go_from_full =  one_hour * (self.capacity*1000)/(pow(battery_power_filtered/normalized_power, 1.02))/normalized_power
                 time_to_go = time_to_go_from_full*(self.energy_stored_wh/(self.capacity*1000))
             else:
-                time_to_go = self.energy_stored_wh * 60 * 60 / battery_power_filtered
+                time_to_go = self.energy_stored_wh * one_hour / battery_power_filtered
             self.time_to_go = time_to_go
         else:
             self.time_to_go = None
             
     def _battery_charge_state(self):
+        two_minutes = 2*60
+        longer_than_two_minutes = lambda x: x >= two_minutes
+        twenty_minutes = 20*60
+        longer_than_twenty_minutes = lambda x: x >= twenty_minutes
+        eleven_hours = 11*60*60
+        longer_than_eleven_hours = lambda x: x >= eleven_hours
+        fully_charged = 100
+        is_fully_charged = lambda x: x == fully_charged
+        low_voltage_rebalance = lambda x: x < 3.25
+
         battery_current = self.battery_current
         if self.lowest_cell_voltage >= self.cell_voltage_full:
            battery_current -= 1 # When all cells balance, the charge current is 1A lower because of passive balancing
+        
         if self.battery_charge_state == self.BATTERY_CHARGE_STATE_BULKABSORPTION:
             if self.lowest_cell_voltage >= self.cell_voltage_full and battery_current < self.capacity_ah*0.04: # Battery is full if all cells are >= Vbalance and tail current <= 4%
                 self._battery_full_counter += 1
@@ -483,9 +505,10 @@ class SmartBMSSerial:
                 # Lower instead of set to zero, so a single time value of a little under will not endlessly keep the counter go to 0
                 self._battery_full_counter = max(self._battery_full_counter-1, 0)
             # Battery_full_counter should really be 120 seconds at least so other systems like generators have time to see the battery as full, too
-            if self._battery_full_counter >= 120 and self.soc == 100: # When BMS also sees the pack as full
+            if  longer_than_two_minutes(self._battery_full_counter) and is_fully_charged(self.soc): # When BMS also sees the pack as full
                 self._battery_full_counter = 0
                 self.battery_charge_state = self.BATTERY_CHARGE_STATE_STORAGE
+        
         elif self.battery_charge_state == self.BATTERY_CHARGE_STATE_STORAGE:
             # Battery idle and unbalance of more than 40mV
             if self.capacity_ah*-0.05 < battery_current < self.capacity_ah*0.05 and self.highest_cell_voltage < self.cell_voltage_full and self.highest_cell_voltage - self.lowest_cell_voltage >= 0.05:
@@ -494,7 +517,7 @@ class SmartBMSSerial:
                 self._unbalance_detection_timer = 0
 
             # If battery is partially discharged, also reset to rebalance. Needed for generator systems as they start at this voltage and stop around 3.5V
-            if self.battery_chemistry == BatteryChemistry.LIFEPO4 and self.lowest_cell_voltage < 3.25:
+            if self.battery_chemistry == BatteryChemistry.LIFEPO4 and low_voltage_rebalance(self.lowest_cell_voltage):
                 self._partially_discharged_timer += 1
             else:
                 self._partially_discharged_timer = 0
@@ -508,8 +531,8 @@ class SmartBMSSerial:
             # Also restart after 11 hours, because it is probably a new day
             if self.soc < 70 \
                 or self._partially_discharged_timer > 9 \
-                or self._unbalance_detection_timer > 20*60 \
-                or self._balanced_timer >= 1*11*60*60:
+                or longer_than_twenty_minutes(self._unbalance_detection_timer) \
+                or longer_than_eleven_hours(self._balanced_timer):
                 self._unbalance_detection_timer = 0
                 self._partially_discharged_timer = 0
                 self._balanced_timer = 0
