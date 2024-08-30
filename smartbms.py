@@ -12,6 +12,7 @@ from datetime import datetime
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 from os import _exit as os_exit
+from typing import Union
 
 # Victron packages
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
@@ -34,12 +35,12 @@ class MAFilter:
     '''
     Add a doc string
     '''
-    def __init__(self, filter_size: int, initial_value: bool):
+    def __init__(self, filter_size: int, initial_value: Union[bool, float, int]):
         self.buffer = [initial_value for _ in range(filter_size)]
         self.pos = 0
         self.filter_size = filter_size
 
-    def add(self, value: float):
+    def add(self, value: Union[bool, float, int]):
         self.buffer[self.pos] = value
         self.pos = (self.pos+1) % self.filter_size
 
@@ -60,7 +61,7 @@ class KeyValuePairGuard:
     def __init__(self):
         self.last_updated = 0
 
-    def update(self, value: float):
+    def update(self, value: Union[bool, float, int]):
         self.value = value
         self.last_updated = time.time()
 
@@ -74,7 +75,7 @@ class KeyValuePairGuard:
 
 class SmartBMSSerial:
     BMS_COMM_TIMEOUT = 20 # Seconds
-    BMS_COMM_BLOCK_SIZE = 58 # Byte size?
+    BMS_COMM_BLOCK_SIZE = 58 # Datablocks are 58 bytes
 
     BATTERY_CHARGE_STATE_BULKABSORPTION = 1
     BATTERY_CHARGE_STATE_STORAGE = 2
