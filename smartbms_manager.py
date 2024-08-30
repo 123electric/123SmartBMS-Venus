@@ -22,9 +22,15 @@ from vedbus import VeDbusService
 from settingsdevice import SettingsDevice
 
 def bound(low, v, high):
-	return max(low, min(v, high))
+    '''
+    docstring
+    '''
+    return max(low, min(v, high))
 
 def hysteresis(input, previous_output, threshold_low, threshold_high):
+    '''
+    docstring
+    '''
     if previous_output:
         return not (input <= threshold_low)
     else:
@@ -57,15 +63,17 @@ class SmartBMSManagerDbus:
         self._loop = loop
 
         self._info = {
-            'name'      : "123SmartBMS Manager",
-            'servicename' : "123SmartBMSManager",
-            'id'          : 0xB050,
-            'version'    : "1.12"
+            'name'      : "123SmartBMS Manager", # make this a variable
+            'servicename' : "123SmartBMSManager", # make this a variable
+            'id'          : 0xB050, # this should be a number?
+            'version'    : "1.12" # make this a variable
         }
-        self._device_instance = 287
+        self._device_instance = 287 # maybe describe why it should be 287
 
-        self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager")
+        self._dbusservice = VeDbusService("com.victronenergy.battery.smartBMSManager") # make this a variable
         
+        # make these class methods?
+
         # Create the management objects, as specified in the ccgx dbus-api document
         self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
         self._dbusservice.add_path('/Mgmt/ProcessVersion', self._info['version'])
@@ -207,7 +215,7 @@ class SmartBMSManagerDbus:
             self._dbusmonitor = DbusMonitor(dbus_tree, valueChangedCallback=self._dbus_value_changed,
                 deviceAddedCallback=self._device_added, deviceRemovedCallback=self._device_removed)
 
-            while(1):
+            while(True):
                 # Lock data before reading/writing because this is a separate thread
                 with self._data_lock:
                     self._scan_connected_smartbmses()
