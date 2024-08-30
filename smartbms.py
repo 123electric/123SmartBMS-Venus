@@ -129,9 +129,11 @@ class SmartBMSSerial:
         self.firmware_version = None
         self.charge_cycles_guard = [KeyValuePairGuard(), KeyValuePairGuard()] # Contains high and low byte
         self.charge_cycles = None
-        self.charged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(), KeyValuePairGuard()] # Contains 3 bytes
+        self.charged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(),
+                                     KeyValuePairGuard()] # Contains 3 bytes
         self.charged_energy = None
-        self.discharged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(), KeyValuePairGuard()] # Contains 3 bytes
+        self.discharged_energy_guard = [KeyValuePairGuard(), KeyValuePairGuard(),
+                                        KeyValuePairGuard()] # Contains 3 bytes
         self.discharged_energy = None
         self.cell_voltage_full_guard = [KeyValuePairGuard(), KeyValuePairGuard()] # Contains high and low byte
         # End option key-value pairs
