@@ -466,7 +466,7 @@ class SmartBMSToDbus(SmartBMSSerial):
             'name'      : "123SmartBMS",
             'servicename' : "123SmartBMS",
             'id'          : 0xB050,
-            'version'    : "1.14"
+            'version'    : "1.15"
         }
 
         device_port = args.device[dev.rfind('/') + 1:]
@@ -487,14 +487,6 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/HardwareVersion',                      None)
         self._dbusservice.add_path('/Serial',                               self._serial_id)
         self._dbusservice.add_path('/Connected',                            None)
-
-        # Create device list
-        self._dbusservice.add_path('/Devices/0/DeviceInstance',             self._device_instance)
-        self._dbusservice.add_path('/Devices/0/FirmwareVersion',            None)
-        self._dbusservice.add_path('/Devices/0/ProductId',                  self._info['id'])
-        self._dbusservice.add_path('/Devices/0/ProductName',                self._info['name'])
-        self._dbusservice.add_path('/Devices/0/ServiceName',                self._info['servicename'])
-        self._dbusservice.add_path('/Devices/0/VregLink',                   "(API)")
 
         # Create the bms paths
         self._dbusservice.add_path('/TimeToGo',                             None)
@@ -552,7 +544,6 @@ class SmartBMSToDbus(SmartBMSSerial):
         if self.alarm_cell_communication or self.alarm_serial_communication:
             self._dbusservice["/Connected"] = 1
             self._dbusservice["/FirmwareVersion"] = None
-            self._dbusservice["/Devices/0/FirmwareVersion"] = None
             self._dbusservice["/Soc"] = None
             self._dbusservice["/Soh"] = None
             self._dbusservice["/SystemSwitch"] = None
@@ -595,7 +586,6 @@ class SmartBMSToDbus(SmartBMSSerial):
         else:
             self._dbusservice["/Connected"] = 1
             self._dbusservice["/FirmwareVersion"] = self.firmware_version
-            self._dbusservice["/Devices/0/FirmwareVersion"] = None
             self._dbusservice["/Soc"] = self.soc
             self._dbusservice["/Soh"] = self.soh
             self._dbusservice["/SystemSwitch"] = 1

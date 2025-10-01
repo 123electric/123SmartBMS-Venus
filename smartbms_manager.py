@@ -59,7 +59,7 @@ class SmartBMSManagerDbus:
             'name'      : "123SmartBMS Manager",
             'servicename' : "123SmartBMSManager",
             'id'          : 0xB050,
-            'version'    : "1.14"
+            'version'    : "1.15"
         }
         self._device_instance = 287
 
@@ -79,14 +79,6 @@ class SmartBMSManagerDbus:
         self._dbusservice.add_path('/Serial', '')
         self._dbusservice.add_path('/Connected',     1)
         self._dbusservice.add_path('/CustomName', self._info['name'])
-
-        # Create device list
-        self._dbusservice.add_path('/Devices/0/DeviceInstance',  self._device_instance)
-        self._dbusservice.add_path('/Devices/0/FirmwareVersion', self._info['version'])
-        self._dbusservice.add_path('/Devices/0/ProductId',       self._info['id'])
-        self._dbusservice.add_path('/Devices/0/ProductName',   self._info['name'])
-        self._dbusservice.add_path('/Devices/0/ServiceName',   self._info['servicename'])
-        self._dbusservice.add_path('/Devices/0/VregLink',     "(API)")
 
         # Create the bms paths
         self._dbusservice.add_path('/TimeToGo',                             None)
