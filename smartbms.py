@@ -297,6 +297,9 @@ class SmartBMSSerial:
         self.highest_cell_temperature = self._decode_temperature(buffer[21:23])
         self.highest_cell_temperature_num = buffer[23]
         self.cell_count = buffer[25]
+        current_cell_nr = buffer[24]
+        cell_voltage = self._decode_voltage(buffer[26:28])
+        cell_temperature = self._decode_temperature(buffer[28:30])
         self.energy_stored_wh = self._decode_value(buffer[34:37], 1)
         self.capacity = round(self._decode_value(buffer[49:51], 0.1), 1) # in kWh
 
@@ -505,6 +508,9 @@ class SmartBMSToDbus(SmartBMSSerial):
         self._dbusservice.add_path('/Io/AllowToDischarge',                  None)
         #self._dbusservice.add_path('/Voltages/Cell1',                      None)
         #self._dbusservice.add_path('/Voltages/Cell2',                      None)
+        self._dbusservice.add_path('/CellDetail/CellNumber',                None)
+        self._dbusservice.add_path('/CellDetail/CellVoltage',               None, gettextcallback=lambda p, v: "{:.3f}V".format(v))
+        self._dbusservice.add_path('/CellDetail/CellTemperature',           None)
         self._dbusservice.add_path('/System/MaxCellVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/System/MinCellVoltage',                None, gettextcallback=lambda p, v: "{:.2f}V".format(v))
         self._dbusservice.add_path('/System/MinVoltageCellId',              None)
@@ -537,6 +543,18 @@ class SmartBMSToDbus(SmartBMSSerial):
         # Register paths which can be externally changed, for example via the GUI
         self._dbusservice.add_path('/CustomName', value=self._settings['CustomName'], writeable=True, onchangecallback=self._settext)
     
+    def _parse_bms_data(self, buffer):
+        super()._parse_bms_data(buffer)
+
+        current_cell_nr = buffer[24]
+        cell_voltage = self._decode_voltage(buffer[26:28])
+        cell_temperature = self._decode_temperature(buffer[28:30])
+
+        if current_cell_nr > 0:
+            self._dbusservice["/CellDetail/CellNumber"] = current_cell_nr
+            self._dbusservice["/CellDetail/CellVoltage"] = cell_voltage
+            self._dbusservice["/CellDetail/CellTemperature"] = cell_temperature
+
     def update(self):
         super().update() # Needs to be called 1x per second
         
