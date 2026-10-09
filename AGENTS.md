@@ -1,6 +1,6 @@
 # 123SmartBMS-Venus
 
-Driver package that publishes 123\SmartBMS data on D-Bus on a Victron GX device (Venus OS). It is installed and updated through kwindrem's SetupHelper (PackageManager). `README.md` is for customers and dealers. This file and `docs/` are for developers and Claude Code, and are kept off the GX with `export-ignore` in `.gitattributes`.
+Driver package that publishes 123\SmartBMS data on D-Bus on a Victron GX device (Venus OS). It is installed and updated through kwindrem's SetupHelper (PackageManager). `README.md` is for customers and dealers. This file and `docs/` are for developers and coding agents such as Claude Code, and are kept off the GX with `export-ignore` in `.gitattributes`.
 
 ## Documentation
 
@@ -20,7 +20,7 @@ Read the relevant file before changing `setup`, the service files or the release
 ## Working rules
 
 - Do not commit, push or move tags unless the maintainer asks for it.
-- Claude Code has no access to a GX device. Report changes as not tested on a device until the maintainer confirms a test on real hardware.
+- Coding agents have no access to a GX device. Report changes as not tested on a device until the maintainer confirms a test on real hardware.
 - Feature pull requests from outside contributors are not merged. If a feature is wanted, it is built in-house so it can be tested on GX hardware first. Per-cell voltages and temperatures on D-Bus are on hold until Victron shows per-cell data in the GX GUI.
 - Keep the indentation style of each file. `setup` uses tabs.
 - A file that must not end up on the GX needs an `export-ignore` line in `.gitattributes`. See [docs/install-and-update.md](docs/install-and-update.md).

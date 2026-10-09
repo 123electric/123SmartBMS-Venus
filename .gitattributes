@@ -2,6 +2,6 @@
 * text=auto
 
 # Developer files: keep them out of the GitHub archive that PackageManager downloads to the GX
-/CLAUDE.md export-ignore
+/AGENTS.md export-ignore
 /docs export-ignore
 /.gitattributes export-ignore

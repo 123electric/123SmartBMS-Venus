@@ -45,4 +45,4 @@ The 123\SmartBMS to USB cable converts the UART of the 123\SmartBMS to a virtual
 | `firstCompatibleVersion` | Oldest supported Venus OS version (`v2.8~10`). |
 | `gitHubInfo` | `123electric:latest`, the GitHub user and ref that PackageManager downloads from. |
 | `changelog.txt`, `README.md`, `LICENSE` | Public files, also shipped to the GX. |
-| `CLAUDE.md`, `docs/`, `.gitattributes` | Developer files, kept out of the GitHub archive with `export-ignore`. |
+| `AGENTS.md`, `docs/`, `.gitattributes` | Developer files, kept out of the GitHub archive with `export-ignore`. |
