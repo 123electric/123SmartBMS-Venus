@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Developer files: keep them out of the GitHub archive that PackageManager downloads to the GX
+/AGENTS.md export-ignore
+/docs export-ignore
+/.gitattributes export-ignore
