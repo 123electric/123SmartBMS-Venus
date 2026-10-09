@@ -1,3 +1,0 @@
-Download test marker for the docs-test branch (2026-10-09).
-If this file is in /data/123SmartBMS-Venus, PackageManager downloaded docs-test.
-Remove this file before docs-test is merged.

@@ -76,7 +76,7 @@ PackageManager downloads `https://github.com/<gitHubUser>/<package>/archive/<bra
 
 ### Keeping files off the GX
 
-SetupHelper has no exclude mechanism of its own: everything in the GitHub archive ends up on the GX. GitHub builds these archives with `git archive`, which leaves out paths that have the `export-ignore` attribute in `.gitattributes`. `AGENTS.md`, `docs/` and `.gitattributes` itself are excluded that way. Keep `LICENSE` in the archive, since the MIT license asks for the license text to be included with copies.
+SetupHelper has no exclude mechanism of its own: everything in the GitHub archive ends up on the GX. GitHub builds these archives with `git archive`, which leaves out paths that have the `export-ignore` attribute in `.gitattributes`. `AGENTS.md`, `docs/` and `.gitattributes` itself are excluded that way. Confirmed on a GX device on 2026-10-09: a manual PackageManager download of a test branch delivered a marker file but none of the excluded paths. Keep `LICENSE` in the archive, since the MIT license asks for the license text to be included with copies.
 
 `export-ignore` only takes effect for the commit the ref points to, so for customers it applies once the `latest` tag is moved to a commit that has it. To check what a ref will deliver:
 
